@@ -70,9 +70,6 @@ func (s *AdminPromoService) Create(ctx context.Context, req *dto.AdminPromoCreat
 		Status:       status,
 		CreatedBy:    &adminID,
 	}
-	if row.PerUserLimit == 0 {
-		row.PerUserLimit = 1
-	}
 	if err := s.repo.Create(ctx, row); err != nil {
 		return nil, errcode.DBError.Wrap(err)
 	}

@@ -5,6 +5,8 @@
 package main
 
 import (
+	_ "time/tzdata"
+
 	"fmt"
 	"net/http"
 	"strconv"

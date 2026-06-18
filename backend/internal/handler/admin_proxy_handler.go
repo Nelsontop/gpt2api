@@ -11,6 +11,7 @@ import (
 	"github.com/kleinai/backend/internal/service"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 // AdminProxyHandler /admin/api/v1/proxies 资源 handler。
@@ -28,7 +29,7 @@ func NewAdminProxyHandler(svc *service.ProxyService, t *service.AccountTestServi
 func (h *AdminProxyHandler) List(c *gin.Context) {
 	var req dto.ProxyListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	items, total, err := h.svc.List(c.Request.Context(), &req)
@@ -50,7 +51,7 @@ func (h *AdminProxyHandler) List(c *gin.Context) {
 func (h *AdminProxyHandler) Create(c *gin.Context) {
 	var req dto.ProxyCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	uid := middleware.UID(c)
@@ -66,7 +67,7 @@ func (h *AdminProxyHandler) Create(c *gin.Context) {
 func (h *AdminProxyHandler) BatchImport(c *gin.Context) {
 	var req dto.ProxyBatchImportReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	uid := middleware.UID(c)
@@ -82,12 +83,12 @@ func (h *AdminProxyHandler) BatchImport(c *gin.Context) {
 func (h *AdminProxyHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的代理 ID"))
 		return
 	}
 	var req dto.ProxyUpdateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	if err := h.svc.Update(c.Request.Context(), id, &req); err != nil {
@@ -101,7 +102,7 @@ func (h *AdminProxyHandler) Update(c *gin.Context) {
 func (h *AdminProxyHandler) Delete(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的代理 ID"))
 		return
 	}
 	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
@@ -115,7 +116,7 @@ func (h *AdminProxyHandler) Delete(c *gin.Context) {
 func (h *AdminProxyHandler) BatchDelete(c *gin.Context) {
 	var req dto.ProxyBatchDeleteReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	deleted, err := h.svc.BatchDelete(c.Request.Context(), req.IDs)
@@ -132,7 +133,7 @@ func (h *AdminProxyHandler) BatchDelete(c *gin.Context) {
 func (h *AdminProxyHandler) Test(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的代理 ID"))
 		return
 	}
 	if h.testSvc == nil {
@@ -160,7 +161,7 @@ func (h *AdminProxyHandler) BatchTest(c *gin.Context) {
 	}
 	var req dto.ProxyBatchTestReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	okCount := 0

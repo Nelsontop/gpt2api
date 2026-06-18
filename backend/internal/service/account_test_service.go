@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/kleinai/backend/internal/dto"
@@ -20,6 +23,7 @@ import (
 	"github.com/kleinai/backend/pkg/crypto"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/jwtpayload"
+	"github.com/kleinai/backend/pkg/logger"
 	"github.com/kleinai/backend/pkg/outbound"
 )
 
@@ -227,6 +231,13 @@ func (s *AccountTestService) Test(ctx context.Context, account *model.Account) (
 	if account.Provider == model.ProviderGROK && account.AuthType == model.AuthTypeCookie && ok {
 		updates["access_token_expires_at"] = now.Add(grokTokenTTL)
 	}
+	// 测试成功时，自动恢复异常账号状态（Banned 除外，需手动解封）
+	if ok && account.Status != model.AccountStatusEnabled && account.Status != model.AccountStatusBanned {
+		updates["status"] = model.AccountStatusEnabled
+		updates["error_count"] = 0
+		updates["cooldown_until"] = nil
+		updates["last_error"] = nil
+	}
 	_ = s.accountRepo.Update(ctx, account.ID, updates)
 
 	return &dto.AccountTestResp{
@@ -331,6 +342,14 @@ func (s *AccountTestService) testOpenAIOAuth(ctx context.Context, account *model
 	}
 
 	info, err := s.probeChatGPTAccount(ctx, account, at, proxyURL)
+	if err != nil && isTokenRevokedError(err) {
+		// OpenAI 服务端撤销了 token（JWT exp 未到期但 token 已失效），强制刷新后重试
+		if refreshErr := s.forceRefreshOAuth(ctx, account); refreshErr != nil {
+			return false, fmt.Sprintf("token 已被撤销，刷新失败: %v (原始错误: %v)", refreshErr, err), nil
+		}
+		at, _ = s.decryptAccessToken(account)
+		info, err = s.probeChatGPTAccount(ctx, account, at, proxyURL)
+	}
 	if err != nil {
 		return false, err.Error(), nil
 	}
@@ -342,6 +361,19 @@ func (s *AccountTestService) testOpenAIOAuth(ctx context.Context, account *model
 }
 
 func (s *AccountTestService) probeChatGPTAccount(ctx context.Context, account *model.Account, accessToken, proxyURL string) (*accountTestInfo, error) {
+	cf := ReadChatGPTCFState()
+	if cf.CFClearance != "" && cf.ProxyURL != "" {
+		proxyURL = cf.ProxyURL
+	}
+	sessionToken := s.decryptSessionToken(account)
+
+	// Cloudflare JA4 TLS 指纹检测：Go/uTLS 的 TLS 指纹均被 CF 拦截(403)，
+	// 只有真实浏览器 TLS（curl 的 OpenSSL）能通过。有 cf_clearance 时用 curl 发请求。
+	if cf.CFClearance != "" {
+		return s.probeChatGPTViaCurl(ctx, account, accessToken, proxyURL, sessionToken, cf)
+	}
+
+	// 无 cf_clearance 时用 Go HTTP client（大概率被 CF 拦截）
 	client, err := outbound.NewClient(outbound.Options{
 		ProxyURL: proxyURL,
 		Timeout:  30 * time.Second,
@@ -351,7 +383,6 @@ func (s *AccountTestService) probeChatGPTAccount(ctx context.Context, account *m
 	if err != nil {
 		return nil, err
 	}
-	sessionToken := s.decryptSessionToken(account)
 	cookieHeader := bootstrapChatGPTCookies(ctx, client, sessionToken)
 	body := []byte(`{"gizmo_id":null,"requested_default_model":null,"conversation_id":null,"timezone_offset_min":-480,"system_hints":["picture_v2"]}`)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://chatgpt.com/backend-api/conversation/init", bytes.NewReader(body))
@@ -361,7 +392,7 @@ func (s *AccountTestService) probeChatGPTAccount(ctx context.Context, account *m
 	setChatGPTProbeHeaders(req, account, accessToken, cookieHeader)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("conversation/init 璇锋眰澶辫触: %w", err)
+		return nil, fmt.Errorf("conversation/init request: %w", err)
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -372,7 +403,10 @@ func (s *AccountTestService) probeChatGPTAccount(ctx context.Context, account *m
 		}
 		return nil, fmt.Errorf("conversation/init HTTP %d: %s", resp.StatusCode, msg)
 	}
+	return parseChatGPTProbeResponse(data)
+}
 
+func parseChatGPTProbeResponse(data []byte) (*accountTestInfo, error) {
 	var payload struct {
 		BlockedFeatures  flexStringList `json:"blocked_features"`
 		DefaultModelSlug string         `json:"default_model_slug"`
@@ -426,10 +460,104 @@ func (s *AccountTestService) probeChatGPTAccount(ctx context.Context, account *m
 	return out, nil
 }
 
+// probeChatGPTViaCurl 用 curl 发 conversation/init 请求。
+// Cloudflare JA4 TLS 指纹检测会拦截 Go/uTLS 的请求(403)，只有真实浏览器 TLS（curl OpenSSL）能通过。
+func (s *AccountTestService) probeChatGPTViaCurl(ctx context.Context, account *model.Account, accessToken, proxyURL, sessionToken string, cf chatgptCFState) (*accountTestInfo, error) {
+	// 构建 cookie 字符串
+	cookies := make([]string, 0, 4)
+	if strings.TrimSpace(sessionToken) != "" {
+		cookies = append(cookies, "__Secure-next-auth.session-token="+strings.TrimSpace(sessionToken))
+	}
+	if cf.Cookies != "" {
+		cookies = append(cookies, cf.Cookies)
+	} else {
+		cookies = append(cookies, "cf_clearance="+cf.CFClearance)
+	}
+	cookieHeader := strings.Join(cookies, "; ")
+
+	reqBody := `{"gizmo_id":null,"requested_default_model":null,"conversation_id":null,"timezone_offset_min":-480,"system_hints":["picture_v2"]}`
+	args := []string{
+		"-s", "-w", "\n__HTTP_STATUS__%{http_code}",
+		"-X", "POST",
+		"https://chatgpt.com/backend-api/conversation/init",
+		"-H", "Content-Type: application/json",
+		"-H", "Accept: application/json",
+		"-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+		"-H", "Sec-Ch-Ua: \"Chromium\";v=\"133\", \"Not(A:Brand\";v=\"24\"",
+		"-H", "Sec-Ch-Ua-Platform: \"Windows\"",
+		"-H", "Sec-Ch-Ua-Mobile: ?0",
+		"-H", "Sec-Ch-Ua-Arch: \"x86\"",
+		"-H", "Sec-Ch-Ua-Bitness: \"64\"",
+		"-H", "Sec-Ch-Ua-Full-Version: \"133.0.6943.98\"",
+		"-H", "Sec-Ch-Ua-Full-Version-List: \"Chromium\";v=\"133.0.6943.98\", \"Not(A:Brand\";v=\"24.0.0.0\"",
+		"-H", "Origin: https://chatgpt.com",
+		"-H", "Referer: https://chatgpt.com/",
+		"-H", "Cache-Control: no-cache",
+		"-H", "Oai-Language: zh-CN",
+		"-H", "Oai-Device-Id: " + fallbackChatGPTDeviceID(account.ID),
+		"-H", fmt.Sprintf("X-Openai-Target-Path: /backend-api/conversation/init"),
+		"-H", fmt.Sprintf("X-Openai-Target-Route: /backend-api/conversation/init"),
+		"-H", fmt.Sprintf("Cookie: %s", cookieHeader),
+		"-d", reqBody,
+		"--max-time", "30",
+	}
+	if accessToken != "" {
+		args = append(args, "-H", "Authorization: Bearer "+accessToken)
+	}
+	if proxyURL != "" {
+		args = append(args, "--proxy", proxyURL)
+	}
+
+	cmd := exec.CommandContext(ctx, "curl", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("curl conversation/init: %w", err)
+	}
+
+	// 解析输出：body + __HTTP_STATUS__<code>
+	raw := string(out)
+	statusIdx := strings.LastIndex(raw, "__HTTP_STATUS__")
+	var body string
+	var statusCode int
+	if statusIdx >= 0 {
+		body = raw[:statusIdx]
+		statusStr := raw[statusIdx+len("__HTTP_STATUS__"):]
+		statusCode, _ = strconv.Atoi(strings.TrimSpace(statusStr))
+	} else {
+		body = raw
+		statusCode = 0
+	}
+
+	logger.L().Info("probe chatgpt via curl",
+		zap.Int("status", statusCode),
+		zap.Int("body_len", len(body)),
+		zap.String("proxy", proxyURL),
+	)
+
+	if statusCode != http.StatusOK {
+		msg := strings.TrimSpace(body)
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return nil, fmt.Errorf("conversation/init HTTP %d: %s", statusCode, msg)
+	}
+	return parseChatGPTProbeResponse([]byte(body))
+}
+
 func bootstrapChatGPTCookies(ctx context.Context, client *http.Client, sessionToken string) string {
 	cookies := make([]string, 0, 4)
 	if strings.TrimSpace(sessionToken) != "" {
 		cookies = append(cookies, "__Secure-next-auth.session-token="+strings.TrimSpace(sessionToken))
+	}
+	cf := ReadChatGPTCFState()
+	if cf.CFClearance != "" {
+		// 有 cf_clearance 时：注入 FlareSolverr 获取的全部 cookies，不再做 bootstrap GET
+		if cf.Cookies != "" {
+			cookies = append(cookies, cf.Cookies)
+		} else {
+			cookies = append(cookies, "cf_clearance="+cf.CFClearance)
+		}
+		return strings.Join(cookies, "; ")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://chatgpt.com/", nil)
 	if err != nil {
@@ -454,11 +582,11 @@ func bootstrapChatGPTCookies(ctx context.Context, client *http.Client, sessionTo
 func setChatGPTProbeHeaders(req *http.Request, account *model.Account, accessToken, cookieHeader string) {
 	const (
 		baseURL          = "https://chatgpt.com"
-		userAgent        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
-		clientVersion    = "prod-81e0c5cdf6140e8c5db714d613337f4aeab94029"
-		clientBuildNum   = "6128297"
+		userAgent        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+		clientVersion    = "prod-be885abbfcfe7b1f511e88b3003d9ee44757fbad"
+		clientBuildNum   = "5955942"
 		defaultLanguage  = "zh-CN"
-		defaultSecCHUA   = `"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"`
+		defaultSecCHUA   = `"Chromium";v="133", "Not(A:Brand";v="24"`
 		defaultPlatform  = `"Windows"`
 		defaultPriority  = "u=1, i"
 		defaultAcceptLng = "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6"
@@ -472,8 +600,8 @@ func setChatGPTProbeHeaders(req *http.Request, account *model.Account, accessTok
 	req.Header.Set("Sec-Ch-Ua", defaultSecCHUA)
 	req.Header.Set("Sec-Ch-Ua-Arch", `"x86"`)
 	req.Header.Set("Sec-Ch-Ua-Bitness", `"64"`)
-	req.Header.Set("Sec-Ch-Ua-Full-Version", `"143.0.3650.96"`)
-	req.Header.Set("Sec-Ch-Ua-Full-Version-List", `"Microsoft Edge";v="143.0.3650.96", "Chromium";v="143.0.7499.147", "Not A(Brand";v="24.0.0.0"`)
+	req.Header.Set("Sec-Ch-Ua-Full-Version", `"133.0.6943.98"`)
+	req.Header.Set("Sec-Ch-Ua-Full-Version-List", `"Chromium";v="133.0.6943.98", "Not(A:Brand";v="24.0.0.0"`)
 	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
 	req.Header.Set("Sec-Ch-Ua-Model", `""`)
 	req.Header.Set("Sec-Ch-Ua-Platform", defaultPlatform)
@@ -494,7 +622,12 @@ func setChatGPTProbeHeaders(req *http.Request, account *model.Account, accessTok
 		req.Header.Del("Authorization")
 	}
 	if cookieHeader != "" {
+		if cf := ReadChatGPTCFState().CFClearance; cf != "" && !strings.Contains(cookieHeader, "cf_clearance=") {
+			cookieHeader = cookieHeader + "; cf_clearance=" + cf
+		}
 		req.Header.Set("Cookie", cookieHeader)
+	} else if cf := ReadChatGPTCFState().CFClearance; cf != "" {
+		req.Header.Set("Cookie", "cf_clearance="+cf)
 	}
 	req.Header.Set("X-Openai-Target-Path", req.URL.Path)
 	req.Header.Set("X-Openai-Target-Route", req.URL.Path)
@@ -940,6 +1073,27 @@ func (s *AccountTestService) maybeRefresh(ctx context.Context, account *model.Ac
 		}
 	}
 	return nil
+}
+
+func (s *AccountTestService) forceRefreshOAuth(ctx context.Context, account *model.Account) error {
+	_, err := s.RefreshOAuth(ctx, account)
+	if err != nil {
+		return err
+	}
+	fresh, err := s.accountRepo.GetByID(ctx, account.ID)
+	if err == nil {
+		*account = *fresh
+	}
+	return nil
+}
+
+func isTokenRevokedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "token_revoked") ||
+		strings.Contains(msg, "invalidated oauth token")
 }
 
 func (s *AccountTestService) TestProxy(ctx context.Context, p *model.Proxy) (*dto.ProxyTestResp, error) {

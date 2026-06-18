@@ -32,10 +32,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kleinai/backend/internal/provider"
+	"github.com/kleinai/backend/pkg/curltransport"
 	"github.com/kleinai/backend/pkg/outbound"
 	"golang.org/x/crypto/sha3"
 )
@@ -260,6 +262,12 @@ func (p *Provider) generateImage2Web(ctx context.Context, req *provider.Request)
 	if base == "" || isCodexBase(base) || strings.Contains(base, "api.openai.com") {
 		base = "https://chatgpt.com"
 	}
+	// cf_clearance 与解决时的 IP 绑定，需用相同代理
+	proxyURL := req.ProxyURL
+	cf := readChatGPTCFState()
+	if cf.CFClearance != "" && cf.ProxyURL != "" {
+		proxyURL = cf.ProxyURL
+	}
 	count := req.Count
 	if count <= 0 {
 		count = 1
@@ -268,7 +276,11 @@ func (p *Provider) generateImage2Web(ctx context.Context, req *provider.Request)
 	ratio := webRatioFromSize(size, strParam(req.Params, "ratio", strParam(req.Params, "aspect_ratio", "1:1")))
 	prompt := webImagePromptV2(req.Prompt, ratio, size)
 	webModel := webImageModelSlug(req)
-	client, err := p.httpClient(req.ProxyURL)
+	client, err := p.httpClient(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	uploadClient, err := p.plainProxyClient(proxyURL)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +315,7 @@ func (p *Provider) generateImage2Web(ctx context.Context, req *provider.Request)
 	})
 	refs := make([]webUploadMeta, 0, len(req.RefAssets))
 	for i, ref := range req.RefAssets {
-		meta, err := p.webUploadImage(ctx, client, base, fp, req.Credential, strings.TrimSpace(ref), fmt.Sprintf("image_%d.png", i+1))
+		meta, err := p.webUploadImage(ctx, client, uploadClient, base, fp, req.Credential, strings.TrimSpace(ref), fmt.Sprintf("image_%d.png", i+1))
 		if err != nil {
 			logUpstream(ctx, req, provider.UpstreamLogEntry{Provider: "gpt", Stage: "web.upload", Method: "POST", URL: base + "/backend-api/files", Error: err.Error(), Meta: map[string]any{"ref_index": i + 1}})
 			return nil, err
@@ -328,13 +340,21 @@ func (p *Provider) generateImage2Web(ctx context.Context, req *provider.Request)
 	assets := make([]provider.Asset, 0, count)
 	lastDiag := ""
 	for i := 0; i < count && len(assets) < count; i++ {
-		conduit, err := p.webPrepareImageConversation(ctx, client, base, fp, req.Credential, reqs, prompt, webModel, refs)
+		// Generate varied prompt for each image to ensure diversity
+		variedPrompt := prompt
+		if count > 1 {
+			styles := []string{"dramatic low-angle warm lighting", "high-angle cool blue tones", "close-up soft lighting", "wide landscape cloudy sky", "silhouette sunset colors", "minimalist white background", "dynamic motion blur"}
+			style := styles[i%len(styles)]
+			variedPrompt = fmt.Sprintf("%s\n\nStyle: %s. Random %d/%d - Must be visually distinct.", prompt, style, i+1, count)
+			if i > 0 { time.Sleep(time.Duration(100+i*50) * time.Millisecond) }
+		}
+		conduit, err := p.webPrepareImageConversation(ctx, client, base, fp, req.Credential, reqs, variedPrompt, webModel, refs)
 		if err != nil {
 			logUpstream(ctx, req, provider.UpstreamLogEntry{Provider: "gpt", Stage: "web.prepare", Method: "POST", URL: base + "/backend-api/f/conversation/prepare", Error: err.Error()})
 			return nil, err
 		}
 		logUpstream(ctx, req, provider.UpstreamLogEntry{Provider: "gpt", Stage: "web.prepare", Method: "POST", URL: base + "/backend-api/f/conversation/prepare", Meta: map[string]any{"has_conduit": conduit != ""}})
-		conversationID, fileIDs, sedimentIDs, directURLs, lastText, err := p.webStartImageGeneration(ctx, client, base, fp, req.Credential, reqs, conduit, prompt, webModel, refs)
+		conversationID, fileIDs, sedimentIDs, directURLs, lastText, err := p.webStartImageGeneration(ctx, client, base, fp, req.Credential, reqs, conduit, variedPrompt, webModel, refs)
 		if err != nil {
 			logUpstream(ctx, req, provider.UpstreamLogEntry{Provider: "gpt", Stage: "web.conversation", Method: "POST", URL: base + "/backend-api/f/conversation", Error: err.Error()})
 			return nil, err
@@ -357,24 +377,37 @@ func (p *Provider) generateImage2Web(ctx context.Context, req *provider.Request)
 		deadline := time.Now().Add(9 * time.Minute)
 		pollCount := 0
 		for {
+			pollError := ""
+			libraryError := ""
 			if conversationID != "" {
-				pollFileIDs, pollSedimentIDs, pollURLs, _ := p.webConversationImageIDs(ctx, client, base, fp, req.Credential, conversationID, refs)
+				pollFileIDs, pollSedimentIDs, pollURLs, pollErr := p.webConversationImageIDs(ctx, client, base, fp, req.Credential, conversationID, refs)
 				pollCount++
+				if pollErr != nil {
+					pollError = pollErr.Error()
+				}
 				addUniqueString(&fileIDs, pollFileIDs...)
 				addUniqueString(&sedimentIDs, pollSedimentIDs...)
 				addUniqueString(&directURLs, pollURLs...)
 				if pollCount == 1 || pollCount%6 == 0 {
-					libFileIDs, _ := p.webLibraryImageIDs(ctx, client, base, fp, req.Credential, conversationID, refs)
+					libFileIDs, libErr := p.webLibraryImageIDs(ctx, client, base, fp, req.Credential, conversationID, refs)
+					if libErr != nil {
+						libraryError = libErr.Error()
+					}
 					addUniqueString(&fileIDs, libFileIDs...)
 				}
 			}
 			urls = p.webResolveImageURLs(ctx, client, base, fp, req.Credential, conversationID, fileIDs, sedimentIDs, refs)
 			addUniqueWebAssetURLs(&urls, directURLs...)
-			if pollCount == 1 || pollCount%12 == 0 {
+			if pollCount == 1 || pollCount%12 == 0 || pollError != "" || libraryError != "" {
+				logErr := pollError
+				if logErr == "" {
+					logErr = libraryError
+				}
 				logUpstream(ctx, req, provider.UpstreamLogEntry{
 					Provider:        "gpt",
 					Stage:           "web.poll",
 					ResponseExcerpt: snippet([]byte(lastText), 160),
+					Error:           snippet([]byte(logErr), 600),
 					Meta: map[string]any{
 						"poll_count":      pollCount,
 						"conversation_id": conversationID,
@@ -383,6 +416,8 @@ func (p *Provider) generateImage2Web(ctx context.Context, req *provider.Request)
 						"direct_urls":     len(directURLs),
 						"resolved_urls":   len(urls),
 						"download_errors": len(downloadErrs),
+						"poll_error":      snippet([]byte(pollError), 240),
+						"library_error":   snippet([]byte(libraryError), 240),
 					},
 				})
 			}
@@ -421,7 +456,7 @@ func (p *Provider) generateImage2Web(ctx context.Context, req *provider.Request)
 			select {
 			case <-ctx.Done():
 				lastDiag = webImage2Diag(conversationID, fileIDs, sedimentIDs, directURLs, urls, downloadErrs, lastText)
-				logUpstream(ctx, req, provider.UpstreamLogEntry{
+				logUpstream(context.Background(), req, provider.UpstreamLogEntry{
 					Provider:        "gpt",
 					Stage:           "web.wait_timeout",
 					ResponseExcerpt: lastDiag,
@@ -754,6 +789,39 @@ func (p *Provider) generateImage2(ctx context.Context, req *provider.Request) (*
 	return &provider.Result{TaskID: req.TaskID, Assets: assets, Latency: time.Since(start)}, nil
 }
 
+// chatgptCFState 存储 FlareSolverr 解出的 Cloudflare cookies。
+type chatgptCFState struct {
+	Cookies     string `json:"cookies"`
+	CFClearance string `json:"cf_clearance"`
+	ProxyURL    string `json:"proxy_url,omitempty"`
+}
+
+var chatgptCFCache struct {
+	mu     sync.Mutex
+	state  chatgptCFState
+	loaded time.Time
+}
+
+func readChatGPTCFState() chatgptCFState {
+	chatgptCFCache.mu.Lock()
+	defer chatgptCFCache.mu.Unlock()
+	if time.Since(chatgptCFCache.loaded) < 30*time.Second {
+		return chatgptCFCache.state
+	}
+	chatgptCFCache.loaded = time.Now()
+	chatgptCFCache.state = chatgptCFState{}
+	path := "/app/storage/chatgpt_cf.json"
+	if v := strings.TrimSpace(os.Getenv("KLEIN_CHATGPT_CF_STATE_PATH")); v != "" {
+		path = v
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return chatgptCFCache.state
+	}
+	_ = json.Unmarshal(raw, &chatgptCFCache.state)
+	return chatgptCFCache.state
+}
+
 type webFP struct {
 	UserAgent     string
 	DeviceID      string
@@ -765,16 +833,22 @@ type webFP struct {
 
 func newWebFP() webFP {
 	return webFP{
-		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
+		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
 		DeviceID:      uuid.NewString(),
 		SessionID:     uuid.NewString(),
 		ClientVersion: "prod-be885abbfcfe7b1f511e88b3003d9ee44757fbad",
 		BuildNumber:   "5955942",
-		SecCHUA:       `"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"`,
+		SecCHUA:       `"Chromium";v="133", "Not(A:Brand";v="24"`,
 	}
 }
 
 func (p *Provider) webBootstrap(ctx context.Context, client *http.Client, base string, fp webFP) error {
+	cf := readChatGPTCFState()
+	if cf.CFClearance != "" {
+		// cf_clearance 已由 FlareSolverr 后台服务获取，无需再做 GET bootstrap。
+		return nil
+	}
+	// 没有 cf_clearance 时仍尝试 GET bootstrap（可能被 CF 挑战拦截）。
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/", nil)
 	if err != nil {
 		return err
@@ -1040,55 +1114,65 @@ func (p *Provider) webLibraryImageIDs(ctx context.Context, client *http.Client, 
 	path := "/backend-api/files/library"
 	body := map[string]any{"limit": 20, "cursor": nil}
 	payload, _ := json.Marshal(body)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+path, bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	for k, v := range webBaseHeaders(fp, token, path) {
-		httpReq.Header.Set(k, v)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "application/json")
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("gpt image2 web library %d: %s", resp.StatusCode, snippet(raw, 240))
-	}
-	var out struct {
-		Items []struct {
-			FileID               string `json:"file_id"`
-			MimeType             string `json:"mime_type"`
-			LibraryFileCategory  string `json:"library_file_category"`
-			State                string `json:"state"`
-			OriginationThreadID  string `json:"origination_thread_id"`
-			OriginationMessageID string `json:"origination_message_id"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	var ids []string
-	for _, item := range out.Items {
-		if item.FileID == "" || item.OriginationThreadID != conversationID {
+	var lastErr error
+	for retry := 0; retry < 2; retry++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+path, bytes.NewReader(payload))
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range webBaseHeaders(fp, token, path) {
+			httpReq.Header.Set(k, v)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Accept", "application/json")
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			lastErr = err
 			continue
 		}
-		if item.State != "" && !strings.EqualFold(item.State, "ready") {
-			continue
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			lastErr = fmt.Errorf("gpt image2 web library %d: %s", resp.StatusCode, snippet(raw, 240))
+			if resp.StatusCode == 504 || resp.StatusCode == 502 || resp.StatusCode == 503 {
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			return nil, lastErr
 		}
-		if item.LibraryFileCategory != "" && !strings.EqualFold(item.LibraryFileCategory, "image") {
-			continue
+		var out struct {
+			Items []struct {
+				FileID               string `json:"file_id"`
+				MimeType             string `json:"mime_type"`
+				LibraryFileCategory  string `json:"library_file_category"`
+				State                string `json:"state"`
+				OriginationThreadID  string `json:"origination_thread_id"`
+				OriginationMessageID string `json:"origination_message_id"`
+			} `json:"items"`
 		}
-		if item.MimeType != "" && !strings.HasPrefix(strings.ToLower(item.MimeType), "image/") {
-			continue
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return nil, err
 		}
-		addUniqueString(&ids, item.FileID)
+		var ids []string
+		for _, item := range out.Items {
+			if item.FileID == "" || item.OriginationThreadID != conversationID {
+				continue
+			}
+			if item.State != "" && !strings.EqualFold(item.State, "ready") {
+				continue
+			}
+			if item.LibraryFileCategory != "" && !strings.EqualFold(item.LibraryFileCategory, "image") {
+				continue
+			}
+			if item.MimeType != "" && !strings.HasPrefix(strings.ToLower(item.MimeType), "image/") {
+				continue
+			}
+			addUniqueString(&ids, item.FileID)
+		}
+		ids, _, _ = filterWebGeneratedAssetIDs(ids, nil, nil, refs)
+		return ids, nil
 	}
-	ids, _, _ = filterWebGeneratedAssetIDs(ids, nil, nil, refs)
-	return ids, nil
+	return nil, lastErr
 }
 
 func (p *Provider) webResolveImageURLs(ctx context.Context, client *http.Client, base string, fp webFP, token, conversationID string, fileIDs, sedimentIDs []string, refs []webUploadMeta) []string {
@@ -1230,7 +1314,7 @@ func (p *Provider) webDownloadAsDataURL(ctx context.Context, client *http.Client
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), mime, nil
 }
 
-func (p *Provider) webUploadImage(ctx context.Context, client *http.Client, base string, fp webFP, token, ref, name string) (webUploadMeta, error) {
+func (p *Provider) webUploadImage(ctx context.Context, client *http.Client, uploadClient *http.Client, base string, fp webFP, token, ref, name string) (webUploadMeta, error) {
 	data, mime, err := readRefImage(ctx, client, ref)
 	if err != nil {
 		return webUploadMeta{}, err
@@ -1280,7 +1364,7 @@ func (p *Provider) webUploadImage(ctx context.Context, client *http.Client, base
 	putReq.Header.Set("Origin", base)
 	putReq.Header.Set("Referer", base+"/")
 	putReq.Header.Set("User-Agent", fp.UserAgent)
-	resp, err = client.Do(putReq)
+	resp, err = uploadClient.Do(putReq)
 	if err != nil {
 		return webUploadMeta{}, err
 	}
@@ -1389,6 +1473,26 @@ func (p *Provider) httpClient(proxyURL string) (*http.Client, error) {
 	if strings.TrimSpace(proxyURL) == "" {
 		return p.client, nil
 	}
+	cf := readChatGPTCFState()
+	if cf.CFClearance != "" && cf.ProxyURL == proxyURL {
+		// 有 cf_clearance 时用 curl transport：Go/uTLS 的 JA4 TLS 指纹都被 CF 拦截(403)，
+		// 只有 curl (OpenSSL 3.5.6) 的 TLS 指纹能通过 CF。
+		return curltransport.NewClient(proxyURL, defaultTimeout), nil
+	}
+	return outbound.NewClient(outbound.Options{
+		ProxyURL: proxyURL,
+		Timeout:  defaultTimeout,
+		Mode:     outbound.ModeUTLS,
+		Profile:  outbound.ProfileChrome,
+	})
+}
+
+// plainProxyClient 创建不走 curltransport 的 HTTP 客户端。
+// 用于 Azure Blob Storage 等无 CF 防护的直连上传，避免 curltransport 处理二进制 body 时崩溃。
+func (p *Provider) plainProxyClient(proxyURL string) (*http.Client, error) {
+	if strings.TrimSpace(proxyURL) == "" {
+		return p.client, nil
+	}
 	return outbound.NewClient(outbound.Options{
 		ProxyURL: proxyURL,
 		Timeout:  defaultTimeout,
@@ -1423,6 +1527,11 @@ func copyParam(dst map[string]any, src map[string]any, key string) {
 }
 
 func shouldUseWebImage2(req *provider.Request) bool {
+	if req.Params != nil {
+		if v, ok := req.Params["_force_web_route"]; ok && v == true {
+			return true
+		}
+	}
 	tier := strings.ToUpper(strings.TrimSpace(strParam(req.Params, "resolution", strParam(req.Params, "size_tier", ""))))
 	if tier == "" {
 		size := strParam(req.Params, "size", "")
@@ -1589,6 +1698,8 @@ func webBaseHeaders(fp webFP, token, path string) map[string]string {
 		"Sec-Ch-Ua-Model":            `""`,
 		"Sec-Ch-Ua-Platform":         `"Windows"`,
 		"Sec-Ch-Ua-Platform-Version": `"19.0.0"`,
+		"Sec-Ch-Ua-Full-Version":     `"133.0.6943.98"`,
+		"Sec-Ch-Ua-Full-Version-List": `"Chromium";v="133.0.6943.98", "Not(A:Brand";v="24.0.0.0"`,
 		"Sec-Fetch-Dest":             "empty",
 		"Sec-Fetch-Mode":             "cors",
 		"Sec-Fetch-Site":             "same-origin",
@@ -1602,6 +1713,14 @@ func webBaseHeaders(fp webFP, token, path string) map[string]string {
 	}
 	if token != "" {
 		h["Authorization"] = "Bearer " + token
+	}
+	cf := readChatGPTCFState()
+	if cf.CFClearance != "" {
+		if cf.Cookies != "" {
+			h["Cookie"] = cf.Cookies
+		} else {
+			h["Cookie"] = "cf_clearance=" + cf.CFClearance
+		}
 	}
 	return h
 }
@@ -1933,19 +2052,30 @@ func isWebImageAssetMessage(msg map[string]any) bool {
 	author, _ := msg["author"].(map[string]any)
 	metadata, _ := msg["metadata"].(map[string]any)
 	content, _ := msg["content"].(map[string]any)
-	role := strings.ToLower(strings.TrimSpace(fmt.Sprint(author["role"])))
-	taskType := strings.ToLower(strings.TrimSpace(fmt.Sprint(metadata["async_task_type"])))
-	contentType := strings.ToLower(strings.TrimSpace(fmt.Sprint(content["content_type"])))
+	role := strings.ToLower(webStringValue(author["role"]))
+	taskType := strings.ToLower(webStringValue(metadata["async_task_type"]))
+	contentType := strings.ToLower(webStringValue(content["content_type"]))
 	if role != "tool" && role != "assistant" {
 		return false
 	}
 	if taskType == "" {
-		taskType = strings.ToLower(strings.TrimSpace(fmt.Sprint(metadata["task_type"])))
+		taskType = strings.ToLower(webStringValue(metadata["task_type"]))
 	}
 	if taskType != "" && !strings.Contains(taskType, "image") && !strings.Contains(taskType, "picture") {
 		return false
 	}
 	return strings.Contains(contentType, "text") || strings.Contains(contentType, "image")
+}
+
+func webStringValue(v any) string {
+	if v == nil {
+		return ""
+	}
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "<nil>" {
+		return ""
+	}
+	return s
 }
 
 func extractWebAssetPointersFromMessage(msg map[string]any, fileIDs, sedimentIDs *[]string) {

@@ -233,7 +233,7 @@ export interface AccountItem {
   id: number;
   provider: 'gpt' | 'grok' | string;
   name: string;
-  auth_type: 'api_key' | 'cookie' | 'oauth' | string;
+  auth_type: 'api_key' | 'cookie' | 'oauth' | 'at' | string;
   credential_mask: string;
   base_url?: string;
   proxy_id?: number;
@@ -305,7 +305,7 @@ export interface AccountBatchRefreshResp {
 export interface AccountCreateBody {
   provider: 'gpt' | 'grok';
   name: string;
-  auth_type: 'api_key' | 'cookie' | 'oauth';
+  auth_type: 'api_key' | 'cookie' | 'oauth' | 'at';
   /** api_key / cookie 必填；oauth 可与 access_token / refresh_token 组合 */
   credential?: string;
   access_token?: string;
@@ -388,7 +388,7 @@ export interface AccountBatchImportBody {
   format?: 'lines' | 'sub2api';
   provider: 'gpt' | 'grok';
   /** lines 模式必填 */
-  auth_type?: 'api_key' | 'cookie' | 'oauth';
+  auth_type?: 'api_key' | 'cookie' | 'oauth' | 'at';
   base_url?: string;
   /** 默认绑定代理 ID；0/undefined = 不绑定 */
   proxy_id?: number;
@@ -439,6 +439,30 @@ export interface CDKCreateBatchResp {
   id: number;
   batch_no: string;
   total_qty: number;
+}
+
+export interface CDKBatchItem {
+  id: number;
+  batch_no: string;
+  name: string;
+  reward_type: string;
+  reward_value: string;
+  total_qty: number;
+  used_qty: number;
+  per_user_limit: number;
+  expire_at?: number;
+  status: 0 | 1 | number;
+  created_at: number;
+}
+
+export interface CDKCodeItem {
+  id: number;
+  batch_id: number;
+  code: string;
+  status: 0 | 1 | 2 | number;
+  used_by?: number;
+  used_at?: number;
+  created_at: number;
 }
 
 // ==================== 代理 ====================

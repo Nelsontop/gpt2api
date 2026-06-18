@@ -7,7 +7,7 @@ package dto
 type AccountCreateReq struct {
 	Provider     string  `json:"provider"      binding:"required,oneof=gpt grok"`
 	Name         string  `json:"name"          binding:"required,min=1,max=128"`
-	AuthType     string  `json:"auth_type"     binding:"required,oneof=api_key cookie oauth"`
+	AuthType     string  `json:"auth_type"     binding:"required,oneof=api_key cookie oauth at"`
 	Credential   string  `json:"credential"    binding:"omitempty"`
 	AccessToken  string  `json:"access_token"  binding:"omitempty"`
 	RefreshToken string  `json:"refresh_token" binding:"omitempty"`
@@ -59,7 +59,7 @@ type AccountBatchImportReq struct {
 	Format   string `json:"format"    binding:"omitempty,oneof=lines sub2api"`
 	Provider string `json:"provider"  binding:"required,oneof=gpt grok"`
 	// lines 模式必填；sub2api 可省略（由每条 account.type / platform 推导）
-	AuthType string  `json:"auth_type" binding:"omitempty,oneof=api_key cookie oauth"`
+	AuthType string  `json:"auth_type" binding:"omitempty,oneof=api_key cookie oauth at"`
 	BaseURL  string  `json:"base_url"  binding:"omitempty,url"`
 	ProxyID  *uint64 `json:"proxy_id" binding:"omitempty"`
 	Weight   int     `json:"weight"    binding:"omitempty,min=1,max=1000"`
@@ -230,4 +230,12 @@ type AccountSecretsResp struct {
 	RefreshToken string `json:"refresh_token,omitempty"`
 	SessionToken string `json:"session_token,omitempty"`
 	ClientID     string `json:"client_id,omitempty"`
+}
+
+// ATImportReq 单个 AT (Access Token) 公开导入请求。
+type ATImportReq struct {
+	Name        string `json:"name"         binding:"required"`
+	AccessToken string `json:"access_token" binding:"required"`
+	Provider    string `json:"provider"     binding:"omitempty,oneof=gpt grok"`
+	Weight      int    `json:"weight"       binding:"omitempty,min=1,max=1000"`
 }

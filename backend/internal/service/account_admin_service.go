@@ -417,6 +417,9 @@ func (s *AccountAdminService) BatchImport(ctx context.Context, adminID uint64, r
 		if req.Provider == model.ProviderGROK && req.AuthType == model.AuthTypeCookie {
 			name, cred, base = parseGrokCookieImportLine(line, req.BaseURL)
 		}
+		if req.AuthType == model.AuthTypeAT {
+			name, cred = parseATImportLine(line)
+		}
 		name = clampImportAccountName(name)
 		if cred == "" {
 			continue
@@ -466,12 +469,13 @@ func (s *AccountAdminService) BatchImport(ctx context.Context, adminID uint64, r
 	}
 	s.pool.Reload(req.Provider)
 	detected, failed := s.probeImportedGrokAccounts(ctx, items)
+	gptDetected, gptFailed := s.probeImportedGPTAccounts(ctx, items)
 	return &dto.BatchImportResult{
 		Imported: len(items),
 		Skipped:  0,
-		Detected: detected,
-		Pending:  maxInt(0, len(items)-detected-failed),
-		Failed:   failed,
+		Detected: detected + gptDetected,
+		Pending:  maxInt(0, len(items)-detected-failed-gptDetected-gptFailed),
+		Failed:   failed + gptFailed,
 	}, nil
 }
 
@@ -855,7 +859,7 @@ func accountSupportsQuotaProbe(a *model.Account) bool {
 	}
 	switch a.Provider {
 	case model.ProviderGPT:
-		return a.AuthType == model.AuthTypeOAuth
+		return a.AuthType == model.AuthTypeOAuth || a.AuthType == model.AuthTypeAT
 	case model.ProviderGROK:
 		return a.AuthType == model.AuthTypeCookie
 	default:
@@ -904,6 +908,55 @@ func (s *AccountAdminService) probeImportedGrokAccounts(ctx context.Context, ite
 	wg.Wait()
 	if detected > 0 || failed > 0 {
 		s.pool.Reload(model.ProviderGROK)
+	}
+	return detected, failed
+}
+
+// probeImportedGPTAccounts 对刚导入的 GPT OAuth/AT 账号执行一次连通性测试，识别用量/套餐信息。
+func (s *AccountAdminService) probeImportedGPTAccounts(ctx context.Context, items []*model.Account) (int, int) {
+	if s.testSvc == nil || len(items) == 0 {
+		return 0, 0
+	}
+	detected := 0
+	failed := 0
+	var mu sync.Mutex
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for _, item := range items {
+		if item == nil || item.Provider != model.ProviderGPT {
+			continue
+		}
+		if item.AuthType != model.AuthTypeOAuth && item.AuthType != model.AuthTypeAT {
+			continue
+		}
+		acc := item
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				mu.Lock()
+				failed++
+				mu.Unlock()
+				return
+			}
+			defer func() { <-sem }()
+			res, err := s.testSvc.Test(ctx, acc)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil || res == nil || !res.OK {
+				failed++
+				return
+			}
+			if strings.TrimSpace(res.PlanType) != "" {
+				detected++
+			}
+		}()
+	}
+	wg.Wait()
+	if detected > 0 || failed > 0 {
+		s.pool.Reload(model.ProviderGPT)
 	}
 	return detected, failed
 }
@@ -969,6 +1022,31 @@ func parseGrokCookieImportLine(line, defaultBase string) (name, cred, base strin
 	}
 	return
 }
+
+// parseATImportLine 解析 AT（Access Token）导入行。
+// 格式：name@accessToken（单个 @ 分隔）
+// 纯 accessToken 无 name 时自动命名为 at-xxxxxx
+func parseATImportLine(line string) (name, accessToken string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	if i := strings.Index(line, "@"); i > 0 {
+		name = strings.TrimSpace(line[:i])
+		accessToken = strings.TrimSpace(line[i+1:])
+		return
+	}
+	accessToken = line
+	if accessToken != "" {
+		if l := len(accessToken); l > 6 {
+			name = "at-" + accessToken[:6]
+		} else {
+			name = "at-" + accessToken
+		}
+	}
+	return
+}
+
 
 func accountToResp(a *model.Account, _ *crypto.AESGCM) *dto.AccountResp {
 	r := &dto.AccountResp{
@@ -1077,6 +1155,68 @@ func int64FromMeta(meta map[string]any, key string) int64 {
 	default:
 		return 0
 	}
+}
+
+// UpsertAT 单个 AT 导入（公开接口）。导入成功后自动执行一次用量检测。
+// 返回 (account, created, testResp, error)；testSvc 不可用时 testResp 为 nil。
+func (s *AccountAdminService) UpsertAT(ctx context.Context, req *dto.ATImportReq) (*model.Account, bool, *dto.AccountTestResp, error) {
+	existing, err := s.repo.GetByProviderAndName(ctx, req.Provider, req.Name)
+	if err == nil && existing != nil {
+		// 命中：仅更新 access_token_enc + access_token_expires_at
+		at := strings.TrimSpace(req.AccessToken)
+		atEnc, err := s.aes.Encrypt([]byte(at))
+		if err != nil {
+			return nil, false, nil, errcode.Internal.Wrap(err)
+		}
+		fields := map[string]any{
+			"access_token_enc": atEnc,
+		}
+		if exp, ok := jwtpayload.ExpUnixFromJWT(at); ok {
+			t := time.Unix(exp, 0).UTC()
+			fields["access_token_expires_at"] = t
+		} else {
+			fields["access_token_expires_at"] = nil
+		}
+		if err := s.repo.Update(ctx, existing.ID, fields); err != nil {
+			return nil, false, nil, errcode.DBError.Wrap(err)
+		}
+		existing.AccessTokenEnc = atEnc
+		s.pool.Reload(req.Provider)
+
+		// 导入成功，执行用量检测
+		testResp := s.probeSingleAccount(ctx, existing)
+		return existing, false, testResp, nil
+	}
+
+	// 不存在：创建新账号（同原逻辑）
+	createReq := &dto.AccountCreateReq{
+		Provider:    req.Provider,
+		Name:        req.Name,
+		AuthType:    model.AuthTypeAT,
+		AccessToken: req.AccessToken,
+		Weight:      req.Weight,
+	}
+	account, err := s.Create(ctx, 0, createReq)
+	if err != nil {
+		return nil, false, nil, err
+	}
+
+	// 导入成功，执行用量检测
+	testResp := s.probeSingleAccount(ctx, account)
+	return account, true, testResp, nil
+}
+
+// probeSingleAccount 对单个账号执行用量检测，返回测试结果（服务不可用时返回 nil）。
+func (s *AccountAdminService) probeSingleAccount(ctx context.Context, a *model.Account) *dto.AccountTestResp {
+	if s.testSvc == nil {
+		return nil
+	}
+	res, err := s.testSvc.Test(ctx, a)
+	if err != nil {
+		return nil
+	}
+	s.pool.Reload(a.Provider)
+	return res
 }
 
 func strPtr(s string) *string { return &s }

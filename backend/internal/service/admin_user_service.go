@@ -192,6 +192,16 @@ func (s *AdminUserService) AdjustPoints(ctx context.Context, id uint64, req *dto
 	return &dto.AdminUserAdjustPointsResp{PointsBefore: log.PointsBefore, PointsAfter: log.PointsAfter}, nil
 }
 
+
+// DeletePaused deletes all paused users (status=0), return deleted count.
+func (s *AdminUserService) DeletePaused(ctx context.Context) (int64, error) {
+	count, err := s.users.DeleteByStatus(ctx, 0)
+	if err != nil {
+		return 0, errcode.DBError.Wrap(err)
+	}
+	return count, nil
+}
+
 func adminUserToResp(u *model.User) *dto.AdminUserResp {
 	r := &dto.AdminUserResp{
 		ID:            u.ID,

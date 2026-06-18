@@ -26,6 +26,8 @@ const (
 	SettingRetryTimeoutSeconds = "retry.timeout_seconds"
 	SettingCircuitFailures     = "tolerance.circuit_failures"
 	SettingCircuitCooldown     = "tolerance.circuit_cooldown_seconds"
+	SettingHealthCheckEnabled = "tolerance.health_check_enabled"
+	SettingHealthCheckCron    = "tolerance.health_check_cron"
 	SettingGrokCFEnabled       = "grok.cf.enabled"
 	SettingGrokCFSolverURL     = "grok.cf.flaresolverr_url"
 	SettingGrokCFRefreshSec    = "grok.cf.refresh_interval_seconds"
@@ -36,6 +38,16 @@ const (
 	SettingGrokCFBrowser       = "grok.cf.browser"
 	SettingGrokCFLastError     = "grok.cf.last_error"
 	SettingGrokCFLastRefreshAt = "grok.cf.last_refresh_at"
+	SettingChatGPTCFEnabled       = "chatgpt.cf.enabled"
+	SettingChatGPTCFSolverURL     = "chatgpt.cf.flaresolverr_url"
+	SettingChatGPTCFRefreshSec    = "chatgpt.cf.refresh_interval_seconds"
+	SettingChatGPTCFTimeoutSec    = "chatgpt.cf.timeout_seconds"
+	SettingChatGPTCFCookies       = "chatgpt.cf.cookies"
+	SettingChatGPTCFClearance     = "chatgpt.cf.clearance"
+	SettingChatGPTCFUserAgent     = "chatgpt.cf.user_agent"
+	SettingChatGPTCFBrowser       = "chatgpt.cf.browser"
+	SettingChatGPTCFLastError     = "chatgpt.cf.last_error"
+	SettingChatGPTCFLastRefreshAt = "chatgpt.cf.last_refresh_at"
 )
 
 // SystemConfigService 通用系统配置 KV 服务，带 30s 内存缓存。
@@ -257,10 +269,20 @@ func (s *SystemConfigService) CircuitCooldownSeconds(ctx context.Context) int64 
 	return v
 }
 
+
+// HealthCheckEnabled 是否启用账号健康巡检。
+func (s *SystemConfigService) HealthCheckEnabled(ctx context.Context) bool {
+	return s.GetBool(ctx, SettingHealthCheckEnabled, true)
+}
+
+// HealthCheckCron 巡检 cron 表达式。
+func (s *SystemConfigService) HealthCheckCron(ctx context.Context) string {
+	return strings.TrimSpace(s.GetString(ctx, SettingHealthCheckCron, "0 */1 * * *"))
+}
+
 func (s *SystemConfigService) GrokCFEnabled(ctx context.Context) bool {
 	return s.GetBool(ctx, SettingGrokCFEnabled, true)
 }
-
 func (s *SystemConfigService) GrokCFSolverURL(ctx context.Context) string {
 	return strings.TrimRight(s.GetString(ctx, SettingGrokCFSolverURL, "http://flaresolverr:8191"), "/")
 }
@@ -278,6 +300,33 @@ func (s *SystemConfigService) GrokCFRefreshInterval(ctx context.Context) time.Du
 
 func (s *SystemConfigService) GrokCFTimeout(ctx context.Context) time.Duration {
 	v := s.GetInt(ctx, SettingGrokCFTimeoutSec, 90)
+	if v < 30 {
+		v = 30
+	}
+	if v > 300 {
+		v = 300
+	}
+	return time.Duration(v) * time.Second
+}
+
+func (s *SystemConfigService) ChatGPTCFEnabled(ctx context.Context) bool {
+	return s.GetBool(ctx, SettingChatGPTCFEnabled, true)
+}
+func (s *SystemConfigService) ChatGPTCFSolverURL(ctx context.Context) string {
+	return strings.TrimRight(s.GetString(ctx, SettingChatGPTCFSolverURL, "http://flaresolverr:8191"), "/")
+}
+func (s *SystemConfigService) ChatGPTCFRefreshInterval(ctx context.Context) time.Duration {
+	v := s.GetInt(ctx, SettingChatGPTCFRefreshSec, 600)
+	if v < 60 {
+		v = 60
+	}
+	if v > 86400 {
+		v = 86400
+	}
+	return time.Duration(v) * time.Second
+}
+func (s *SystemConfigService) ChatGPTCFTimeout(ctx context.Context) time.Duration {
+	v := s.GetInt(ctx, SettingChatGPTCFTimeoutSec, 90)
 	if v < 30 {
 		v = 30
 	}

@@ -14,6 +14,7 @@ const (
 	AuthTypeAPIKey = "api_key"
 	AuthTypeCookie = "cookie"
 	AuthTypeOAuth  = "oauth"
+	AuthTypeAT     = "at"
 )
 
 // Account 状态：1启用 0停用 2熔断 -1禁用。
@@ -72,6 +73,11 @@ type Account struct {
 // IsOAuth 判断是否 OAuth 账号（含 RT 刷新逻辑）。
 func (a *Account) IsOAuth() bool {
 	return a.AuthType == AuthTypeOAuth
+}
+
+// IsAT 判断是否 AT（Access Token）账号。
+func (a *Account) IsAT() bool {
+	return a.AuthType == AuthTypeAT
 }
 
 // TableName 表名。

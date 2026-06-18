@@ -466,7 +466,29 @@ func (s *ChatService) prepare(ctx context.Context, req ChatCallRequest, modelCod
 	if existing, err := s.repo.GetByIdem(ctx, req.UserID, req.IdemKey); err == nil && existing != nil {
 		return nil, nil, errcode.InvalidParam.WithMsg("idempotent chat replay is not supported for response body")
 	}
-	acc, err := s.pool.Pick(ctx, providerName, "round_robin")
+	acc, err := s.pool.PickConcurrent(ctx, providerName, func(a *model.Account) bool {
+		if a == nil {
+			return false
+		}
+		if a.Status != model.AccountStatusEnabled {
+			return false
+		}
+		if a.LastTestStatus == model.AccountTestFail {
+			return false
+		}
+		if a.CooldownUntil != nil && time.Now().UTC().Before(*a.CooldownUntil) {
+			return false
+		}
+		if a.AccessTokenExpiresAt != nil && time.Now().UTC().After(*a.AccessTokenExpiresAt) {
+			return false
+		}
+		return true
+	})
+	reqStart := time.Now()
+	defer func(start time.Time, accountID uint64) {
+		s.pool.RecordLatency(accountID, time.Since(start))
+		s.pool.ReleaseConcurrent(accountID)
+	}(reqStart, acc.ID)
 	if err != nil {
 		return nil, nil, errcode.ResourceMissing.WithMsg("no available chat account: " + err.Error())
 	}

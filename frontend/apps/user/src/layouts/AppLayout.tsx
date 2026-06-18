@@ -9,11 +9,9 @@ import {
   Image,
   LogIn,
   LogOut,
-  MessageCircle,
   PanelLeft,
   Search,
   Settings,
-  Video,
   type LucideIcon,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -33,8 +31,6 @@ const APP_VERSION = 'v2.0.1';
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/create/image', label: '图片', icon: Image },
-  { to: '/create/text', label: '文字', icon: MessageCircle },
-  { to: '/create/video', label: '视频', icon: Video },
   { to: '/history', label: '历史', icon: Clock3, authed: true },
   { to: '/billing', label: '充值', icon: CreditCard, authed: true },
   { to: '/keys', label: '密钥', icon: FileKey2, authed: true },

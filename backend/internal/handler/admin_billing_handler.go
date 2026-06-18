@@ -7,6 +7,7 @@ import (
 	"github.com/kleinai/backend/internal/repo"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 type AdminBillingHandler struct {
@@ -20,7 +21,7 @@ func NewAdminBillingHandler(wallet *repo.WalletRepo) *AdminBillingHandler {
 func (h *AdminBillingHandler) WalletLogs(c *gin.Context) {
 	var req dto.AdminWalletLogListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	rows, total, err := h.wallet.ListAdminLogs(c.Request.Context(), repo.AdminWalletLogFilter{

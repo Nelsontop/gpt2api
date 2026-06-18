@@ -10,6 +10,7 @@ import (
 	"github.com/kleinai/backend/internal/service"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 // AdminAuthHandler 后台认证 handler。
@@ -27,7 +28,7 @@ func NewAdminAuthHandler(auth *service.AdminAuthService, r *repo.AdminRepo) *Adm
 func (h *AdminAuthHandler) Login(c *gin.Context) {
 	var req dto.LoginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	u, tok, err := h.auth.Login(c.Request.Context(), &req, c.ClientIP())
@@ -73,7 +74,7 @@ func (h *AdminAuthHandler) ChangePassword(c *gin.Context) {
 	uid := middleware.MustUID(c)
 	var req dto.ChangePasswordReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	if err := h.auth.ChangePassword(c.Request.Context(), uid, &req); err != nil {

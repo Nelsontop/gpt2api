@@ -131,6 +131,25 @@ func (r *UserRepo) UpdatePassword(ctx context.Context, id uint64, hash string) e
 		Update("password", hash).Error
 }
 
+
+// GetByUsername find user by username (not deleted).
+func (r *UserRepo) GetByUsername(ctx context.Context, username string) (*model.User, error) {
+	var u model.User
+	err := r.db.WithContext(ctx).Where("username = ? AND deleted_at IS NULL", username).First(&u).Error
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	return &u, nil
+}
+
+// DeleteByStatus soft-delete users by status, return deleted count.
+func (r *UserRepo) DeleteByStatus(ctx context.Context, status int8) (int64, error) {
+	result := r.db.WithContext(ctx).
+		Where("status = ? AND deleted_at IS NULL", status).
+		Delete(&model.User{})
+	return result.RowsAffected, result.Error
+}
+
 // ErrNotFound 显式语义。
 var ErrNotFound = errors.New("repo: not found")
 

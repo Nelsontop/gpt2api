@@ -10,8 +10,8 @@ import (
 	"github.com/kleinai/backend/internal/middleware"
 	"github.com/kleinai/backend/internal/model"
 	"github.com/kleinai/backend/internal/service"
-	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 // BillingHandler 用户端计费 handler。
@@ -59,7 +59,7 @@ func (h *BillingHandler) Logs(c *gin.Context) {
 func (h *BillingHandler) RedeemCDK(c *gin.Context) {
 	var req dto.CDKRedeemReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	uid := middleware.MustUID(c)

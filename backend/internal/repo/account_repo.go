@@ -29,6 +29,18 @@ func (r *AccountRepo) BatchCreate(ctx context.Context, items []*model.Account) e
 	return r.db.WithContext(ctx).CreateInBatches(items, 200).Error
 }
 
+// GetByProviderAndName 按 provider+name 查第一条（ID 最小）未删除记录。
+func (r *AccountRepo) GetByProviderAndName(ctx context.Context, provider, name string) (*model.Account, error) {
+	var a model.Account
+	err := r.db.WithContext(ctx).
+		Where("provider = ? AND name = ? AND deleted_at IS NULL", provider, name).
+		Order("id ASC").First(&a).Error
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	return &a, nil
+}
+
 // GetByID 主键查询。
 func (r *AccountRepo) GetByID(ctx context.Context, id uint64) (*model.Account, error) {
 	var a model.Account
@@ -151,17 +163,70 @@ func (r *AccountRepo) SoftDeleteAll(ctx context.Context, provider string) (int64
 }
 
 // AvailableByProvider 拿出给定 provider 下当前可用的账号（用于调度器装载）。
+// 加载 Enabled 账号，以及 cooldown 已过期的 Broken 账号（自动恢复）。
 func (r *AccountRepo) AvailableByProvider(ctx context.Context, provider string) ([]*model.Account, error) {
 	var items []*model.Account
 	now := time.Now().UTC()
 	err := r.db.WithContext(ctx).
 		Where("provider = ? AND deleted_at IS NULL", provider).
-		Where("(status = ? OR (status = ? AND cooldown_until IS NOT NULL AND cooldown_until <= ?))", model.AccountStatusEnabled, model.AccountStatusBroken, now).
+		Where("(status = ? OR (status = ? AND cooldown_until IS NOT NULL AND cooldown_until <= ?))",
+			model.AccountStatusEnabled, model.AccountStatusBroken, now).
 		Where("cooldown_until IS NULL OR cooldown_until <= ?", now).
 		Where("access_token_expires_at IS NULL OR access_token_expires_at > ?", now).
+		Where("last_test_status != ?", model.AccountTestFail).
 		Order("id ASC").
 		Find(&items).Error
+
+	// cooldown 过期的 Broken 账号自动恢复为 Enabled
+	for _, acc := range items {
+		if acc.Status == model.AccountStatusBroken {
+			r.db.WithContext(ctx).Model(&model.Account{}).
+				Where("id = ?", acc.ID).
+				Updates(map[string]any{
+					"status":         model.AccountStatusEnabled,
+					"cooldown_until": nil,
+				})
+			acc.Status = model.AccountStatusEnabled
+			acc.CooldownUntil = nil
+		}
+	}
+
 	return items, err
+}
+
+// ProviderAccountDiagnostic 账号池诊断：返回某 provider 下各状态账号数量，
+// 用于"选不到账号"时区分"根本没有账号"还是"有账号但全部不可用"。
+type ProviderAccountDiagnostic struct {
+	Total          int64
+	Enabled        int64
+	Disabled       int64
+	Broken         int64
+	Banned         int64
+	InCooldown     int64
+	TestFailed     int64
+	Untested       int64
+	TokenExpired   int64
+	OAuthCount     int64
+	OAuthAvailable int64
+}
+
+func (r *AccountRepo) ProviderAccountDiagnostic(ctx context.Context, provider string) (*ProviderAccountDiagnostic, error) {
+	var d ProviderAccountDiagnostic
+	err := r.db.WithContext(ctx).Model(&model.Account{}).
+		Where("provider = ? AND deleted_at IS NULL", provider).
+		Select(`COUNT(1) AS total,
+			SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) AS enabled,
+			SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) AS disabled,
+			SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) AS broken,
+			SUM(CASE WHEN status = -1 THEN 1 ELSE 0 END) AS banned,
+			SUM(CASE WHEN cooldown_until IS NOT NULL AND cooldown_until > UTC_TIMESTAMP() THEN 1 ELSE 0 END) AS in_cooldown,
+			SUM(CASE WHEN last_test_status = 2 THEN 1 ELSE 0 END) AS test_failed,
+			SUM(CASE WHEN last_test_status = 0 THEN 1 ELSE 0 END) AS untested,
+			SUM(CASE WHEN access_token_expires_at IS NOT NULL AND access_token_expires_at <= UTC_TIMESTAMP() THEN 1 ELSE 0 END) AS token_expired,
+			SUM(CASE WHEN auth_type = 'oauth' THEN 1 ELSE 0 END) AS oauth_count,
+			SUM(CASE WHEN auth_type = 'oauth' AND status = 1 AND (cooldown_until IS NULL OR cooldown_until <= UTC_TIMESTAMP()) AND (access_token_expires_at IS NULL OR access_token_expires_at > UTC_TIMESTAMP()) AND last_test_status != 2 THEN 1 ELSE 0 END) AS oauth_available`).
+		Scan(&d).Error
+	return &d, err
 }
 
 // MarkUsed 标记调度成功。

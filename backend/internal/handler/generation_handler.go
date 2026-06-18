@@ -25,6 +25,7 @@ import (
 	"github.com/kleinai/backend/pkg/crypto"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 // GenerationHandler 生成任务 handler。
@@ -78,7 +79,7 @@ func (h *GenerationHandler) CachedAsset(c *gin.Context) {
 func (h *GenerationHandler) CreateImage(c *gin.Context) {
 	var req dto.CreateImageReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	uid := middleware.MustUID(c)
@@ -133,7 +134,7 @@ func (h *GenerationHandler) CreateImage(c *gin.Context) {
 func (h *GenerationHandler) CreateVideo(c *gin.Context) {
 	var req dto.CreateVideoReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	uid := middleware.MustUID(c)
@@ -186,7 +187,7 @@ func (h *GenerationHandler) CreateVideo(c *gin.Context) {
 func (h *GenerationHandler) CreateText(c *gin.Context) {
 	var req dto.CreateTextReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	if h.chatSvc == nil {
@@ -328,7 +329,7 @@ func (h *GenerationHandler) Asset(c *gin.Context) {
 	}
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, target, nil)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	req.Header.Set("Cookie", cookie)

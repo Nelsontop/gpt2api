@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUp,
+  ArrowUpLeft,
   Check,
+  Copy,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -537,7 +539,17 @@ export default function CreateStudioPage() {
             className="mx-auto max-w-[1500px] columns-1 gap-3 sm:columns-2 lg:columns-3 xl:columns-4 2xl:columns-5"
             style={{ columnWidth: '220px' }}
           >
-            {resultItems.map((item) => <WorkCard key={item.task_id} item={item} onOpen={setPreview} />)}
+            {resultItems.map((item) => (
+              <WorkCard 
+                key={item.task_id} 
+                item={item} 
+                onOpen={setPreview}
+                onUsePrompt={(p) => {
+                  setPrompt(p);
+                  promptRef.current?.focus();
+                }}
+              />
+            ))}
           </div>
         )}
       </section>
@@ -697,7 +709,8 @@ function HistoryActionMenu({
   );
 }
 
-function WorkCard({ item, onOpen }: { item: GenerationTask; onOpen: (preview: { url: string; type: 'image' | 'video'; title: string }) => void }) {
+function WorkCard({ item, onOpen, onUsePrompt }: { item: GenerationTask; onOpen: (preview: { url: string; type: 'image' | 'video'; title: string }) => void; onUsePrompt?: (prompt: string) => void }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const result = item.results?.[0];
   const thumb = result?.thumb_url;
   const original = result?.url;
@@ -708,7 +721,9 @@ function WorkCard({ item, onOpen }: { item: GenerationTask; onOpen: (preview: { 
   const declaredRatio = result?.width && result?.height ? `${result.width} / ${result.height}` : '';
   const mediaRatio = loadedRatio || declaredRatio || (isVideo ? '16 / 9' : '1 / 1');
   const canOpen = item.status === 2 && !!original;
-  const prompt = compactPrompt(item.prompt);
+  const fullPrompt = item.prompt || '';
+  const prompt = compactPrompt(fullPrompt);
+  const canExpand = fullPrompt.length > 28;
   const setRatioFromImage = (el: HTMLImageElement) => {
     if (el.naturalWidth > 0 && el.naturalHeight > 0) {
       setLoadedRatio(`${el.naturalWidth} / ${el.naturalHeight}`);
@@ -774,9 +789,59 @@ function WorkCard({ item, onOpen }: { item: GenerationTask; onOpen: (preview: { 
           </div>
         )}
       </button>
-      <div className="flex items-center gap-1.5 px-2.5 py-2 text-xs text-neutral-500">
-        <span className="shrink-0">{fmtRelative(item.created_at)}</span>
-        {prompt && <span className="truncate text-neutral-600">{prompt}</span>}
+      <div className="flex flex-col gap-1.5 px-2.5 py-2 text-xs text-neutral-500">
+        <button
+          type="button"
+          onClick={() => canExpand && setIsExpanded(!isExpanded)}
+          className={clsx(
+            'flex items-center gap-1.5 text-left',
+            canExpand && 'cursor-pointer hover:text-neutral-700'
+          )}
+        >
+          <span className="shrink-0">{fmtRelative(item.created_at)}</span>
+          {prompt && <span className="truncate text-neutral-600">{prompt}</span>}
+          {canExpand && (
+            <ChevronDown
+              size={14}
+              className={clsx('shrink-0 transition-transform', isExpanded && 'rotate-180')}
+            />
+          )}
+        </button>
+        
+        {isExpanded && fullPrompt && (
+          <div className="mt-1 space-y-2 border-t border-neutral-200 pt-2">
+            <p className="whitespace-pre-wrap text-neutral-700 leading-relaxed">
+              {fullPrompt}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigator.clipboard.writeText(fullPrompt)}
+                className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs hover:bg-neutral-200"
+              >
+                <Copy size={12} />
+                复制
+              </button>
+              {onUsePrompt && (
+                <button
+                  type="button"
+                  onClick={() => onUsePrompt(fullPrompt)}
+                  className="inline-flex items-center gap-1 rounded bg-neutral-900 px-2 py-1 text-xs text-white hover:bg-neutral-800"
+                >
+                  <ArrowUpLeft size={12} />
+                  使用此提示词
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsExpanded(false)}
+                className="ml-auto text-neutral-400 hover:text-neutral-600"
+              >
+                收起
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </article>
   );

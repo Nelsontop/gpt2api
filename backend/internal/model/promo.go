@@ -31,7 +31,7 @@ type PromoCode struct {
 	ApplyTo       string    `gorm:"column:apply_to;size:64;not null;default:all" json:"apply_to"`
 	TotalQty      int       `gorm:"column:total_qty;not null;default:0" json:"total_qty"`
 	UsedQty       int       `gorm:"column:used_qty;not null;default:0" json:"used_qty"`
-	PerUserLimit  int       `gorm:"column:per_user_limit;not null;default:1" json:"per_user_limit"`
+	PerUserLimit  int       `gorm:"column:per_user_limit;not null;default:0" json:"per_user_limit"`
 	StartAt       time.Time `gorm:"column:start_at;not null" json:"start_at"`
 	EndAt         time.Time `gorm:"column:end_at;not null" json:"end_at"`
 	Status        int8      `gorm:"column:status;not null;default:1" json:"status"`
@@ -71,7 +71,7 @@ type RedeemCodeBatch struct {
 	RewardValue   string     `gorm:"column:reward_value;type:json;not null" json:"reward_value"`
 	TotalQty      int        `gorm:"column:total_qty;not null" json:"total_qty"`
 	UsedQty       int        `gorm:"column:used_qty;not null;default:0" json:"used_qty"`
-	PerUserLimit  int        `gorm:"column:per_user_limit;not null;default:1" json:"per_user_limit"`
+	PerUserLimit  int        `gorm:"column:per_user_limit;not null;default:0" json:"per_user_limit"`
 	ExpireAt      *time.Time `gorm:"column:expire_at" json:"expire_at,omitempty"`
 	Status        int8       `gorm:"column:status;not null;default:1" json:"status"`
 	CreatedBy     *uint64    `gorm:"column:created_by" json:"created_by,omitempty"`

@@ -4,6 +4,54 @@
 
 ---
 
+## v2.1.0 — 2026-06-18
+
+### 账号池并发控制
+
+- 新增 `PickConcurrent` / `ReleaseConcurrent`：按权重限制单账号并发数，避免单账号过载
+- 新增 `RecordLatency`：记录每次请求响应时间，供调度策略参考
+- 新增 `MarkSuspect`：任务失败时降低账号权重，配合熔断机制
+- 图片生成与文字对话链路均已接入并发控制
+
+### Cloudflare WAF 绕过
+
+- 新增 `pkg/curltransport`：基于 `libcurl` + OpenSSL 3.5.6 的 HTTP transport，支持 JA3/JA4 指纹伪装
+- 新增 `chatgpt_cf_refresh_service`：自动维护 ChatGPT Web 路线的 cf_clearance cookie
+- 配合 FlareSolverr 容器实现两层 CF 绕过
+- GPT Web 图片路线可通过 CF 绕过直接访问 `chatgpt.com`
+
+### 账号健康检查
+
+- 新增 `account_health_check_service`：定期探测账号可用性
+- 新增 `account_pool_recovery_service`：自动恢复短暂熔断的账号
+- 管理后台系统配置页集成健康检查触发与状态展示
+
+### GPT Web 路线优化
+
+- 按图片数量动态计算超时：单图超时可配置（默认 10 分钟），总超时不超过 30 分钟
+- 选号失败诊断信息增强：输出账号池状态、可用账号数、冷却账号数等
+- Web 路线与 Codex 路线自动切换逻辑优化
+
+### 校验器框架
+
+- 新增 `pkg/validator`：统一参数校验翻译，支持中文错误信息
+- 新增 `dto.RegisterValidatorTypes()`：DTO 级别校验规则注册
+- 所有 Gin 路由接入校验翻译中间件
+
+### 前端
+
+- CDK 管理页重写：批量生成（按数量/前缀/面额）、批量删除、统计概览卡片
+- Admin 配置页新增全局代理模式 UI（Fixed / Random）
+- 用户前台创作页布局优化、计费页充值记录增强
+
+### 其他
+
+- 新增 `public_handler`：无需鉴权的公开接口
+- `pricing_test.go`、`generation_service_test.go`、`account_health_check_service_test.go` 测试补充
+- `generation_gpt_web_retry_test.go`：GPT Web 路线重试测试
+
+---
+
 ## v2.0.1 — 2026-05-04
 
 ### 视频生成

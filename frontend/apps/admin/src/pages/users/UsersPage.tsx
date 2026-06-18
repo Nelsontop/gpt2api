@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, CheckCircle2, MinusCircle, Pencil, Plus, PlusCircle, RefreshCw, Search } from 'lucide-react';
+import { Ban, CheckCircle2, MinusCircle, Pencil, Plus, PlusCircle, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { ApiError } from '../../lib/api';
@@ -56,6 +56,12 @@ export default function UsersPage() {
     onError: (e: ApiError) => toast.error(e.message),
   });
 
+  const deletePaused = useMutation({
+    mutationFn: () => usersApi.deletePaused(),
+    onSuccess: (r) => { refresh(); toast.success(`已删除 ${r.deleted} 个暂停用户`); },
+    onError: (e: ApiError) => toast.error(e.message),
+  });
+
   return (
     <div className="page page-wide space-y-4">
       <header className="page-header">
@@ -66,6 +72,11 @@ export default function UsersPage() {
         <div className="flex flex-wrap gap-2">
           <button className="btn btn-outline btn-md" onClick={refresh}>
             <RefreshCw size={16} /> 刷新
+          </button>
+          <button className="btn btn-danger btn-md" disabled={deletePaused.isPending} onClick={() => {
+            if (confirm('确定删除所有暂停用户？此操作不可恢复。')) deletePaused.mutate();
+          }}>
+            <Trash2 size={16} /> 删除暂停用户
           </button>
           <button className="btn btn-primary btn-md" onClick={() => setDlg({ mode: 'create' })}>
             <Plus size={18} /> 新增用户

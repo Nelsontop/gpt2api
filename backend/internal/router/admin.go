@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kleinai/backend/internal/bootstrap"
+	"github.com/kleinai/backend/internal/dto"
 	"github.com/kleinai/backend/internal/handler"
 	"github.com/kleinai/backend/internal/middleware"
 	"github.com/kleinai/backend/internal/repo"
@@ -17,6 +18,8 @@ import (
 // MountAdmin 在 root 上挂载 /admin/api/v1。
 // 这里提供 AccountPool 实例，供后续 worker / openai 服务可能复用（暂存内部）。
 func MountAdmin(r *gin.Engine, deps *bootstrap.Deps) *service.AccountPool {
+	dto.RegisterValidatorTypes()
+
 	v1 := r.Group("/admin/api/v1")
 
 	v1.GET("/ping", func(c *gin.Context) {
@@ -58,6 +61,7 @@ func MountAdmin(r *gin.Engine, deps *bootstrap.Deps) *service.AccountPool {
 	accountTest := service.NewAccountTestService(accountRepo, proxySvc, sysCfgSvc, openaiOAuth, deps.AES)
 	// 把测试服务注入 AccountAdminService，使 Test/Refresh/BatchRefresh 走得通。
 	accountAdmin.SetTestService(accountTest)
+	healthCheckSvc := service.NewAccountHealthCheckService(accountRepo, accountTest, pool, sysCfgSvc)
 
 	// === handlers ===
 	authH := handler.NewAdminAuthHandler(adminAuth, adminRepo)
@@ -67,7 +71,7 @@ func MountAdmin(r *gin.Engine, deps *bootstrap.Deps) *service.AccountPool {
 	billingH := handler.NewAdminBillingHandler(walletRepo)
 	promoH := handler.NewAdminPromoHandler(promoSvc)
 	proxyH := handler.NewAdminProxyHandler(proxySvc, accountTest)
-	sysH := handler.NewAdminSystemHandler(sysCfgSvc)
+	sysH := handler.NewAdminSystemHandler(sysCfgSvc, healthCheckSvc)
 	logH := handler.NewAdminLogHandler(generationRepo, accountRepo, deps.AES)
 	dashboardH := handler.NewAdminDashboardHandler(dashboardRepo)
 
@@ -93,6 +97,7 @@ func MountAdmin(r *gin.Engine, deps *bootstrap.Deps) *service.AccountPool {
 			users.POST("", userH.Create)
 			users.PUT("/:id", userH.Update)
 			users.POST("/:id/points", userH.AdjustPoints)
+			users.DELETE("/paused", userH.DeletePaused)
 		}
 
 		acc := authed.Group("/accounts")
@@ -131,13 +136,18 @@ func MountAdmin(r *gin.Engine, deps *bootstrap.Deps) *service.AccountPool {
 		{
 			sys.GET("/settings", sysH.GetSettings)
 			sys.PUT("/settings", sysH.UpdateSettings)
+			sys.POST("/health-check", sysH.RunHealthCheck)
 			sys.GET("/cache", sysH.CacheStats)
 			sys.DELETE("/cache", sysH.CleanCache)
 		}
 
 		cdk := authed.Group("/cdk")
 		{
+			cdk.GET("/batches", cdkH.ListBatches)
+			cdk.GET("/codes", cdkH.ListCodes)
 			cdk.POST("/batches", cdkH.CreateBatch)
+			cdk.PUT("/batches/:id/status", cdkH.ToggleBatchStatus)
+			cdk.DELETE("/batches/:id", cdkH.DeleteBatch)
 		}
 
 		billing := authed.Group("/billing")

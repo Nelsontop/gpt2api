@@ -1,6 +1,11 @@
 package repo
 
 import (
+	"go.uber.org/zap"
+
+	"github.com/kleinai/backend/pkg/logger"
+	"fmt"
+	"strconv"
 	"context"
 	"time"
 
@@ -11,6 +16,32 @@ import (
 
 type DashboardRepo struct{ db *gorm.DB }
 
+
+func toInt64(v any) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case []byte:
+		i, _ := strconv.ParseInt(string(n), 10, 64)
+		return i
+	case string:
+		i, _ := strconv.ParseInt(n, 10, 64)
+		return i
+	case float64:
+		return int64(n)
+	}
+	return 0
+}
+
+func toString(v any) string {
+        switch s := v.(type) {
+        case string:
+                return s
+        case []byte:
+                return string(s)
+        }
+        return fmt.Sprintf("%v", v)
+}
 func NewDashboardRepo(db *gorm.DB) *DashboardRepo { return &DashboardRepo{db: db} }
 
 type dashboardGenerationAgg struct {
@@ -64,9 +95,9 @@ type dashboardRecentRow struct {
 }
 
 type dashboardTrendRow struct {
-	Date           string
-	GeneratedCount int64
-	CostPoints     int64
+	Date           string `gorm:"column:date"`
+	GeneratedCount int64  `gorm:"column:generated_count"`
+	CostPoints     int64  `gorm:"column:cost_points"`
 }
 
 func (r *DashboardRepo) Overview(ctx context.Context) (*dto.AdminDashboardOverviewResp, error) {
@@ -149,21 +180,37 @@ LIMIT 8`
 		return nil, err
 	}
 
-	var trendRows []*dashboardTrendRow
+	trendMap := map[string]*dashboardTrendRow{}
 	trendSQL := `SELECT
-  DATE(created_at) AS date,
+  DATE_FORMAT(created_at, '%Y-%m-%d') AS date,
   COUNT(1) AS generated_count,
   COALESCE(SUM(cost_points), 0) AS cost_points
 FROM generation_task
 WHERE deleted_at IS NULL AND created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
-GROUP BY DATE(created_at)
-ORDER BY DATE(created_at) ASC`
-	if err := r.db.WithContext(ctx).Raw(trendSQL).Scan(&trendRows).Error; err != nil {
+GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
+ORDER BY date ASC`
+	nativeRows, err := r.db.Session(&gorm.Session{}).Raw(trendSQL).Rows()
+	if err != nil {
 		return nil, err
 	}
-	trendMap := map[string]*dashboardTrendRow{}
-	for _, row := range trendRows {
-		trendMap[row.Date] = row
+	defer nativeRows.Close()
+	columns, _ := nativeRows.Columns()
+	logger.L().Info("trend query", zap.Int("columns", len(columns)), zap.Strings("cols", columns))
+	rowCount := 0
+	for nativeRows.Next() {
+		rowCount++
+		values := make([]any, len(columns))
+		ptrs := make([]any, len(columns))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := nativeRows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		dateStr := toString(values[0])
+		genCount := toInt64(values[1])
+		costPts := toInt64(values[2])
+		trendMap[dateStr] = &dashboardTrendRow{Date: dateStr, GeneratedCount: genCount, CostPoints: costPts}
 	}
 
 	resp := &dto.AdminDashboardOverviewResp{

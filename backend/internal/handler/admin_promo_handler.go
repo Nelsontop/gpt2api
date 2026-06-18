@@ -10,6 +10,7 @@ import (
 	"github.com/kleinai/backend/internal/service"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 type AdminPromoHandler struct {
@@ -23,7 +24,7 @@ func NewAdminPromoHandler(svc *service.AdminPromoService) *AdminPromoHandler {
 func (h *AdminPromoHandler) List(c *gin.Context) {
 	var req dto.AdminPromoListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	rows, total, err := h.svc.List(c.Request.Context(), &req)
@@ -44,7 +45,7 @@ func (h *AdminPromoHandler) List(c *gin.Context) {
 func (h *AdminPromoHandler) Create(c *gin.Context) {
 	var req dto.AdminPromoCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	row, err := h.svc.Create(c.Request.Context(), &req, middleware.MustUID(c))
@@ -58,12 +59,12 @@ func (h *AdminPromoHandler) Create(c *gin.Context) {
 func (h *AdminPromoHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的 ID"))
 		return
 	}
 	var req dto.AdminPromoUpdateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	if err := h.svc.Update(c.Request.Context(), id, &req); err != nil {
@@ -76,7 +77,7 @@ func (h *AdminPromoHandler) Update(c *gin.Context) {
 func (h *AdminPromoHandler) Delete(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的 ID"))
 		return
 	}
 	if err := h.svc.Delete(c.Request.Context(), id); err != nil {

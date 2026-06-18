@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,16 +14,18 @@ import (
 	"github.com/kleinai/backend/internal/service"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 // AdminSystemHandler /admin/api/v1/system 资源 handler。
 type AdminSystemHandler struct {
-	svc *service.SystemConfigService
+	svc            *service.SystemConfigService
+	healthCheckSvc *service.AccountHealthCheckService
 }
 
 // NewAdminSystemHandler 构造。
-func NewAdminSystemHandler(svc *service.SystemConfigService) *AdminSystemHandler {
-	return &AdminSystemHandler{svc: svc}
+func NewAdminSystemHandler(svc *service.SystemConfigService, healthCheckSvc *service.AccountHealthCheckService) *AdminSystemHandler {
+	return &AdminSystemHandler{svc: svc, healthCheckSvc: healthCheckSvc}
 }
 
 // GetSettings GET /admin/api/v1/system/settings
@@ -41,7 +44,7 @@ func (h *AdminSystemHandler) GetSettings(c *gin.Context) {
 func (h *AdminSystemHandler) UpdateSettings(c *gin.Context) {
 	var body map[string]any
 	if err := c.ShouldBindJSON(&body); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	if len(body) == 0 {
@@ -82,7 +85,7 @@ func (h *AdminSystemHandler) CleanCache(c *gin.Context) {
 		All  bool `json:"all"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	if !body.All && body.Days <= 0 {
@@ -106,6 +109,18 @@ func (h *AdminSystemHandler) CleanCache(c *gin.Context) {
 		"deleted_bytes": deletedBytes,
 		"remain_bytes":  remainBytes,
 	})
+}
+
+// RunHealthCheck POST /admin/api/v1/system/health-check
+func (h *AdminSystemHandler) RunHealthCheck(c *gin.Context) {
+	if h.healthCheckSvc == nil {
+		response.Fail(c, errcode.Internal.WithMsg("health check service not available"))
+		return
+	}
+	bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	h.healthCheckSvc.RunOnce(bgCtx)
+	response.OK(c, gin.H{"triggered": true})
 }
 
 func generatedCacheRoot() (string, error) {

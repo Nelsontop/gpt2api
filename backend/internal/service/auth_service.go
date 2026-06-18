@@ -42,7 +42,7 @@ var (
 func (s *AuthService) Register(ctx context.Context, req *dto.RegisterReq, ip string) (*model.User, *dto.TokenPair, error) {
 	account := strings.TrimSpace(req.Account)
 	if account == "" {
-		return nil, nil, errcode.InvalidParam
+		return nil, nil, errcode.InvalidParam.WithMsg("账号不能为空")
 	}
 
 	user := &model.User{
@@ -65,6 +65,13 @@ func (s *AuthService) Register(ctx context.Context, req *dto.RegisterReq, ip str
 		user.Phone = &p
 	default:
 		user.Username = &account
+	}
+
+	// username uniqueness check
+	if user.Username != nil && *user.Username != "" {
+		if existing, err := s.user.GetByUsername(ctx, *user.Username); err == nil && existing != nil {
+			return nil, nil, errcode.InvalidParam.WithMsg("username already exists")
+		}
 	}
 
 	hash, err := crypto.HashPassword(req.Password)

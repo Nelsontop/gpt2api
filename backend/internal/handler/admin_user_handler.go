@@ -9,6 +9,7 @@ import (
 	"github.com/kleinai/backend/internal/service"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 type AdminUserHandler struct {
@@ -22,7 +23,7 @@ func NewAdminUserHandler(svc *service.AdminUserService) *AdminUserHandler {
 func (h *AdminUserHandler) List(c *gin.Context) {
 	var req dto.AdminUserListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	items, total, err := h.svc.List(c.Request.Context(), &req)
@@ -43,7 +44,7 @@ func (h *AdminUserHandler) List(c *gin.Context) {
 func (h *AdminUserHandler) Create(c *gin.Context) {
 	var req dto.AdminUserCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	u, err := h.svc.Create(c.Request.Context(), &req)
@@ -57,12 +58,12 @@ func (h *AdminUserHandler) Create(c *gin.Context) {
 func (h *AdminUserHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的用户 ID"))
 		return
 	}
 	var req dto.AdminUserUpdateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	if err := h.svc.Update(c.Request.Context(), id, &req); err != nil {
@@ -72,15 +73,25 @@ func (h *AdminUserHandler) Update(c *gin.Context) {
 	response.OK(c, nil)
 }
 
+
+func (h *AdminUserHandler) DeletePaused(c *gin.Context) {
+	count, err := h.svc.DeletePaused(c.Request.Context())
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{"deleted": count})
+}
+
 func (h *AdminUserHandler) AdjustPoints(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的用户 ID"))
 		return
 	}
 	var req dto.AdminUserAdjustPointsReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	res, err := h.svc.AdjustPoints(c.Request.Context(), id, &req)

@@ -32,17 +32,9 @@ import type {
 import { toast } from '../../stores/toast';
 
 type ProviderFilter = 'all' | 'gpt' | 'grok';
-type PlanTypeFilter = 'all' | 'basic' | 'super' | 'heavy';
 type AuthType = 'api_key' | 'oauth' | 'cookie';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200];
-
-const PLAN_TYPE_OPTIONS = [
-  { value: 'all', label: '全部类型' },
-  { value: 'basic', label: 'Basic' },
-  { value: 'super', label: 'Super' },
-  { value: 'heavy', label: 'Heavy' },
-] as const;
 
 function normalizeBaseURL(value?: string): string | undefined {
   const trimmed = (value || '').trim();
@@ -136,7 +128,6 @@ export default function TokenAccountsPage() {
   const qc = useQueryClient();
 
   const [provider, setProvider] = useState<ProviderFilter>('all');
-  const [planType, setPlanType] = useState<PlanTypeFilter>('all');
   const [keyword, setKeyword] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -150,12 +141,11 @@ export default function TokenAccountsPage() {
   const query = useMemo(
     () => ({
       provider: provider === 'all' ? undefined : provider,
-      plan_type: planType === 'all' ? undefined : planType,
       keyword: keyword.trim() || undefined,
       page,
       page_size: pageSize,
     }),
-    [provider, planType, keyword, page, pageSize],
+    [provider, keyword, page, pageSize],
   );
 
   const list = useQuery({
@@ -299,7 +289,7 @@ export default function TokenAccountsPage() {
 
   useEffect(() => {
     setSelected(new Set());
-  }, [provider, planType, keyword]);
+  }, [provider, keyword]);
 
   const toggleSelect = (id: number) => {
     setSelected((prev) => {
@@ -398,20 +388,6 @@ export default function TokenAccountsPage() {
             setPage(1);
           }}
         />
-        <select
-          className="select select-sm min-w-[132px]"
-          value={planType}
-          onChange={(e) => {
-            setPlanType(e.target.value as PlanTypeFilter);
-            setPage(1);
-          }}
-        >
-          {PLAN_TYPE_OPTIONS.map((item) => (
-            <option key={item.value} value={item.value}>
-              {item.label}
-            </option>
-          ))}
-        </select>
         <span className="whitespace-nowrap text-tiny text-text-tertiary">
           共 <span className="font-medium tabular-nums text-text-secondary">{fmtNumber(total)}</span> 条
         </span>
@@ -664,6 +640,7 @@ export default function TokenAccountsPage() {
             setOpenImport(false);
             refresh();
           }}
+          onProbeGPT={() => batchProbe.mutate('gpt')}
         />
       )}
 
@@ -883,7 +860,7 @@ function CreateDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   );
 }
 
-function ImportDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+function ImportDialog({ onClose, onSuccess, onProbeGPT }: { onClose: () => void; onSuccess: () => void; onProbeGPT?: () => void }) {
   const [importMode, setImportMode] = useState<'lines' | 'sub2api'>('lines');
   const [body, setBody] = useState<AccountBatchImportBody>({
     provider: 'gpt',
@@ -928,6 +905,7 @@ function ImportDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         typeof res.failed === 'number' && res.failed > 0 ? `失败 ${res.failed} 条` : '',
       ].filter(Boolean);
       toast.success(parts.join('，'));
+      if (body.provider === 'gpt' && res.imported > 0) onProbeGPT?.();
       onSuccess();
     },
     onError: (e: ApiError) => toast.error(e.message),
@@ -970,6 +948,7 @@ function ImportDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         failed ? `失败 ${failed} 条` : '',
       ].filter(Boolean);
       toast.success(parts.join('，'));
+      if (body.provider === 'gpt' && imported > 0) onProbeGPT?.();
       onSuccess();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : '导入失败');

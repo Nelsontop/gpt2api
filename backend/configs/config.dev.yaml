@@ -4,3 +4,11 @@ app:
 logger:
   level: debug
   console: true
+
+jwt:
+  secret: this-is-a-very-long-secret-key-for-jwt-signing-32bytes-minimum-required
+  access_ttl: 2h
+  refresh_ttl: 336h
+
+aes:
+  key: this-is-aes-encryption-key-32bytes-long!!

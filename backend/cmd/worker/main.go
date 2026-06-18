@@ -6,8 +6,11 @@ package main
 
 import (
 	"context"
+	_ "time/tzdata"
+
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
@@ -45,6 +48,15 @@ func main() {
 		sysCfgSvc := service.NewSystemConfigService(repo.NewSystemConfigRepo(deps.DB))
 		proxySvc := service.NewProxyService(repo.NewProxyRepo(deps.DB), deps.AES)
 		service.NewGrokCFRefreshService(sysCfgSvc, proxySvc).Start(context.Background())
+		service.NewChatGPTCFRefreshService(sysCfgSvc, proxySvc).Start(context.Background())
+
+		// 启动账号健康巡检：每天 9:00 自动测试连通性，失败账号自动禁用
+		accountRepo := repo.NewAccountRepo(deps.DB)
+		openaiOAuthSvc := service.NewOpenAIOAuthService(sysCfgSvc)
+		testSvc := service.NewAccountTestService(accountRepo, proxySvc, sysCfgSvc, openaiOAuthSvc, deps.AES)
+		pool := service.NewAccountPool(accountRepo, 30*time.Second)
+		service.NewAccountHealthCheckService(accountRepo, testSvc, pool, sysCfgSvc).Start(context.Background())
+			service.NewAccountPoolRecoveryService(accountRepo, testSvc, pool, sysCfgSvc).Start(context.Background())
 	}
 
 	srv := asynq.NewServer(

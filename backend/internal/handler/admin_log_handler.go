@@ -18,6 +18,7 @@ import (
 	"github.com/kleinai/backend/pkg/crypto"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 type AdminLogHandler struct {
@@ -33,7 +34,7 @@ func NewAdminLogHandler(gen *repo.GenerationRepo, acc *repo.AccountRepo, aes *cr
 func (h *AdminLogHandler) GenerationLogs(c *gin.Context) {
 	var req dto.AdminGenerationLogListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	rows, total, err := h.gen.ListAdminLogs(c.Request.Context(), repo.AdminGenerationLogFilter{
@@ -205,7 +206,7 @@ func serveAdminCachedAsset(c *gin.Context, rel string) {
 func proxyRemoteAsset(c *gin.Context, target, cookie, rawURL string) {
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, target, nil)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	req.Header.Set("Cookie", cookie)
@@ -291,7 +292,7 @@ func adminAssetName(rawURL string) string {
 func (h *AdminLogHandler) PurgeGenerationLogs(c *gin.Context) {
 	var req dto.AdminGenerationLogPurgeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	before := time.Now().UTC().AddDate(0, 0, -req.Days)

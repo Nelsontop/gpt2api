@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Gift, Sparkles, Wallet } from 'lucide-react';
+import { ExternalLink, Gift, Wallet } from 'lucide-react';
 
 import { ApiError } from '../../lib/api';
 import { fmtBiz, fmtPoints, fmtTime, pointsClass } from '../../lib/format';
-import { billingApi } from '../../lib/services';
+import { billingApi, genApi, systemApi } from '../../lib/services';
 import { useAuthStore } from '../../stores/auth';
 import { toast } from '../../stores/toast';
 
@@ -12,6 +12,23 @@ export default function BillingPage() {
   const me = useAuthStore((s) => s.me);
   const refreshMe = useAuthStore((s) => s.refreshMe);
   const qc = useQueryClient();
+
+  const settingsQ = useQuery({
+    queryKey: ['system.settings'],
+    queryFn: () => systemApi.get(),
+  });
+  const shopUrl = String(settingsQ.data?.['payment.shop_url'] || '');
+
+  const modelCatalog = useQuery({
+    queryKey: ['gen.models'],
+    queryFn: () => genApi.models(),
+  });
+  // Get gpt-image-2 unit price (in points), default to 400 (4 * 100)
+  const imageModel = modelCatalog.data?.find((m) => m.model_code === 'gpt-image-2');
+  const imageUnitPoints = imageModel?.unit_points ?? 400;
+  // Calculate how many images can be generated with available points
+  const availablePoints = me?.points ?? 0;
+  const generatableImages = imageUnitPoints > 0 ? Math.floor(availablePoints / imageUnitPoints) : 0;
 
   const [page, setPage] = useState(1);
   const logsQ = useQuery({
@@ -35,6 +52,7 @@ export default function BillingPage() {
   const stats = [
     { label: '可用点数', value: fmtPoints(me?.points ?? 0), accent: true },
     { label: '冻结点数', value: fmtPoints(me?.frozen_points ?? 0) },
+    { label: '可生图次数', value: `${generatableImages} 张` },
     { label: '当前套餐', value: me?.plan_code?.toUpperCase() ?? 'FREE' },
     { label: '邀请码', value: me?.invite_code ?? '—' },
   ];
@@ -95,17 +113,23 @@ export default function BillingPage() {
         <div className="card-tinted card-section">
           <header className="section-header mb-3">
             <span className="section-title">
-              <Sparkles size={18} className="text-klein-500" />
-              充值套餐
+              <ExternalLink size={18} className="text-klein-500" />
+              充值链接
             </span>
-            <span className="badge badge-klein">即将上线</span>
+            {shopUrl ? <span className="badge badge-success">可用</span> : <span className="badge badge-klein">未配置</span>}
           </header>
           <p className="text-small text-text-secondary mb-4 leading-loose">
-            支付通道（微信 / 支付宝 / Stripe）正在开发中，当前请通过 CDK 或邀请获得点数。
+            点击前往链动小铺购买充值卡密，然后使用左侧兑换码功能兑换点数。
           </p>
-          <button className="btn btn-outline btn-md" disabled type="button">
-            敬请期待
-          </button>
+          {shopUrl ? (
+            <a href={shopUrl || "#"} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-md inline-flex items-center gap-2">
+              前往充值 <ExternalLink size={14} />
+            </a>
+          ) : (
+            <button className="btn btn-outline btn-md" disabled type="button">
+              暂未开放
+            </button>
+          )}
           <p className="mt-3 text-small text-text-tertiary leading-loose">
             冻结点数不会按时间自动释放，它只会在任务成功结算时转为已消费，或在任务失败、超时后自动退款解冻。
           </p>

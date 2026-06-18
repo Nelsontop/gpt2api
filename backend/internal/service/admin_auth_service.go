@@ -32,7 +32,7 @@ func NewAdminAuthService(r *repo.AdminRepo, jwt *jwtx.Manager) *AdminAuthService
 func (s *AdminAuthService) Login(ctx context.Context, req *dto.LoginReq, ip string) (*model.AdminUser, *dto.TokenPair, error) {
 	username := strings.TrimSpace(req.Account)
 	if username == "" {
-		return nil, nil, errcode.InvalidParam
+		return nil, nil, errcode.InvalidParam.WithMsg("账号不能为空")
 	}
 	u, err := s.repo.GetByUsername(ctx, username)
 	if err != nil {

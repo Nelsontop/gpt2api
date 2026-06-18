@@ -27,6 +27,8 @@ import type {
   AdminWalletLogItem,
   AdminLoginResp,
   AdminMe,
+  CDKBatchItem,
+  CDKCodeItem,
   CDKCreateBatchBody,
   CDKCreateBatchResp,
   DashboardOverviewResp,
@@ -75,6 +77,8 @@ export const usersApi = {
     request<void>({ url: `/users/${id}`, method: 'PUT', data: body }),
   adjustPoints: (id: number, body: AdminUserAdjustPointsBody) =>
     request<AdminUserAdjustPointsResp>({ url: `/users/${id}/points`, method: 'POST', data: body }),
+  deletePaused: () =>
+    request<{ deleted: number }>({ url: '/users/paused', method: 'DELETE' }),
 };
 
 export interface GenerationLogListQuery {
@@ -200,13 +204,35 @@ export const accountsApi = {
     }),
 };
 
+export interface CDKBatchListQuery {
+  keyword?: string;
+  status?: '' | 0 | 1;
+  page?: number;
+  page_size?: number;
+}
+
+export interface CDKCodeListQuery {
+  batch_id: number;
+  status?: '' | 0 | 1 | 2;
+  page?: number;
+  page_size?: number;
+}
+
 export const cdkApi = {
+  listBatches: (q: CDKBatchListQuery = {}) =>
+    request<PageData<CDKBatchItem>>({ url: '/cdk/batches', method: 'GET', params: q }),
+  listCodes: (q: CDKCodeListQuery) =>
+    request<PageData<CDKCodeItem>>({ url: '/cdk/codes', method: 'GET', params: q }),
   createBatch: (body: CDKCreateBatchBody) =>
     request<CDKCreateBatchResp>({
       url: '/cdk/batches',
       method: 'POST',
       data: body,
     }),
+  deleteBatch: (id: number) =>
+    request<{ deleted: number }>({ url: `/cdk/batches/${id}`, method: 'DELETE' }),
+  toggleBatchStatus: (id: number, status: 0 | 1) =>
+    request<{ id: number; status: number }>({ url: `/cdk/batches/${id}/status`, method: 'PUT', data: { status } }),
 };
 
 // ==================== 代理 ====================

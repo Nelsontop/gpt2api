@@ -13,6 +13,7 @@ import (
 	"github.com/kleinai/backend/internal/service"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 // AdminAccountHandler /admin/api/v1/accounts 资源 handler。
@@ -30,7 +31,7 @@ func NewAdminAccountHandler(svc *service.AccountAdminService, pool *service.Acco
 func (h *AdminAccountHandler) List(c *gin.Context) {
 	var req dto.AccountListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	items, total, err := h.svc.List(c.Request.Context(), &req)
@@ -52,7 +53,7 @@ func (h *AdminAccountHandler) List(c *gin.Context) {
 func (h *AdminAccountHandler) Create(c *gin.Context) {
 	var req dto.AccountCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	uid := middleware.UID(c)
@@ -68,12 +69,12 @@ func (h *AdminAccountHandler) Create(c *gin.Context) {
 func (h *AdminAccountHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的账号 ID"))
 		return
 	}
 	var req dto.AccountUpdateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	if err := h.svc.Update(c.Request.Context(), id, &req); err != nil {
@@ -87,7 +88,7 @@ func (h *AdminAccountHandler) Update(c *gin.Context) {
 func (h *AdminAccountHandler) Delete(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的账号 ID"))
 		return
 	}
 	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
@@ -102,7 +103,7 @@ func (h *AdminAccountHandler) BatchImport(c *gin.Context) {
 	const maxSub2APIChunk = 500
 	var req dto.AccountBatchImportReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	format := strings.ToLower(strings.TrimSpace(req.Format))
@@ -143,7 +144,7 @@ func (h *AdminAccountHandler) BatchImport(c *gin.Context) {
 func (h *AdminAccountHandler) BatchDelete(c *gin.Context) {
 	var req dto.AccountBatchDeleteReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	n, err := h.svc.BatchDeleteByIDs(c.Request.Context(), req.IDs)
@@ -158,7 +159,7 @@ func (h *AdminAccountHandler) BatchDelete(c *gin.Context) {
 func (h *AdminAccountHandler) BatchAssignProxy(c *gin.Context) {
 	var req dto.AccountBatchAssignProxyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	res, err := h.svc.BatchAssignProxy(c.Request.Context(), &req)
@@ -173,7 +174,7 @@ func (h *AdminAccountHandler) BatchAssignProxy(c *gin.Context) {
 func (h *AdminAccountHandler) Purge(c *gin.Context) {
 	var req dto.AccountPurgeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	n, err := h.svc.PurgeAccounts(c.Request.Context(), &req)
@@ -193,7 +194,7 @@ func (h *AdminAccountHandler) PoolStats(c *gin.Context) {
 func (h *AdminAccountHandler) Test(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的账号 ID"))
 		return
 	}
 	res, err := h.svc.Test(c.Request.Context(), id)
@@ -210,7 +211,7 @@ func (h *AdminAccountHandler) Test(c *gin.Context) {
 func (h *AdminAccountHandler) Secrets(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的账号 ID"))
 		return
 	}
 	res, err := h.svc.GetSecrets(c.Request.Context(), id)
@@ -225,7 +226,7 @@ func (h *AdminAccountHandler) Secrets(c *gin.Context) {
 func (h *AdminAccountHandler) RefreshOAuth(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的账号 ID"))
 		return
 	}
 	res, err := h.svc.RefreshOAuth(c.Request.Context(), id)

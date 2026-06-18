@@ -178,3 +178,6 @@ export interface RedeemCDKResp {
   biz: string;
   message: string;
 }
+
+// System settings (partial, only what user needs)
+export type SystemSettings = Record<string, string | number | boolean>;

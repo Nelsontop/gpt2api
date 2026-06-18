@@ -107,6 +107,38 @@ func TestExtractWebImageToolIDsAcceptsAssistantImageMessages(t *testing.T) {
 	}
 }
 
+func TestExtractWebImageToolIDsAcceptsToolAssetPointerWithoutTaskType(t *testing.T) {
+	raw := []byte(`{
+		"conversation_id":"conv_image2",
+		"messages":[
+			{
+				"message":{
+					"author":{"role":"tool"},
+					"content":{
+						"content_type":"multimodal_text",
+						"parts":[
+							{
+								"content_type":"image_asset_pointer",
+								"asset_pointer":"sediment://file_000000004df47208af7be7b33a4dfe37",
+								"size_bytes":1991817,
+								"width":1122,
+								"height":1402
+							}
+						]
+					}
+				}
+			}
+		]
+	}`)
+	fileIDs, sedimentIDs := extractWebImageToolIDs(raw)
+	if len(fileIDs) != 0 {
+		t.Fatalf("unexpected file ids: %v", fileIDs)
+	}
+	if len(sedimentIDs) != 1 || sedimentIDs[0] != "file_000000004df47208af7be7b33a4dfe37" {
+		t.Fatalf("expected generated sediment id, got %v", sedimentIDs)
+	}
+}
+
 func TestWebImageMessageContentReferenceOrder(t *testing.T) {
 	content, metadata := webImageMessageContent("make it transparent", []webUploadMeta{{
 		FileID:        "file_ref123456",

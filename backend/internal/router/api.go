@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kleinai/backend/internal/bootstrap"
+	"github.com/kleinai/backend/internal/dto"
 	"github.com/kleinai/backend/internal/handler"
 	"github.com/kleinai/backend/internal/middleware"
 	"github.com/kleinai/backend/internal/provider/factory"
@@ -18,11 +19,16 @@ import (
 // MountAPI 在 root 上挂载用户端 /api/v1 全部业务路由。
 // 注意：未配置 DB 时（dev 降级）会跳过依赖 DB 的路由，仅保留 /ping。
 func MountAPI(r *gin.Engine, deps *bootstrap.Deps) {
+	dto.RegisterValidatorTypes()
+
 	v1 := r.Group("/api/v1")
 
 	v1.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"pong": true})
 	})
+
+	// 公开接口（无需鉴权）- 需要在 DB 初始化之后
+	// AT 导入将在 DB check 之后注册（见下方）
 
 	if deps.DB == nil {
 		return
@@ -45,6 +51,7 @@ func MountAPI(r *gin.Engine, deps *bootstrap.Deps) {
 	proxySvc := service.NewProxyService(proxyRepo, deps.AES)
 
 	pool := service.NewAccountPool(accountRepo, 30*time.Second)
+	accountAdminSvc := service.NewAccountAdminService(accountRepo, pool, deps.AES)
 	providers := factory.Build()
 	genSvc := service.NewGenerationService(deps.DB, genRepo, pool, billingSvc, providers, service.ConfigPriceFn(sysCfgSvc), deps.AES, proxySvc, sysCfgSvc)
 	chatSvc := service.NewChatService(deps.DB, genRepo, pool, billingSvc, sysCfgSvc, deps.AES, proxySvc)
@@ -57,6 +64,11 @@ func MountAPI(r *gin.Engine, deps *bootstrap.Deps) {
 	v1.GET("/models", genH.Models)
 	v1.GET("/gen/cached/*path", genH.CachedAsset)
 	v1.GET("/gen/assets/:task_id/:seq", genH.Asset)
+
+	// 公开 AT 导入接口（无需鉴权）
+	publicH := handler.NewPublicHandler(accountAdminSvc, pool, sysCfgSvc)
+	v1.POST("/public/at-import", publicH.ATImport)
+	v1.GET("/system/settings", publicH.GetSettings)
 
 	auth := v1.Group("/auth")
 	{

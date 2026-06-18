@@ -13,6 +13,8 @@ interface FormState {
   retry_timeout_seconds: number;
   tolerance_circuit_failures: number;
   tolerance_circuit_cooldown_seconds: number;
+  tolerance_health_check_enabled: boolean;
+  tolerance_health_check_cron: string;
   proxy_global_enabled: boolean;
   proxy_selection_mode: 'fixed' | 'random';
   proxy_global_id: number;
@@ -36,6 +38,7 @@ interface FormState {
   alipay_private_key: string;
   wechat_mch_id: string;
   wechat_api_v3_key: string;
+  shop_url: string;
 }
 
 const DEFAULT_FORM: FormState = {
@@ -44,6 +47,8 @@ const DEFAULT_FORM: FormState = {
   retry_timeout_seconds: 300,
   tolerance_circuit_failures: 3,
   tolerance_circuit_cooldown_seconds: 300,
+  tolerance_health_check_enabled: true,
+  tolerance_health_check_cron: '0 */1 * * *',
   proxy_global_enabled: false,
   proxy_selection_mode: 'fixed',
   proxy_global_id: 0,
@@ -67,6 +72,7 @@ const DEFAULT_FORM: FormState = {
   alipay_private_key: '',
   wechat_mch_id: '',
   wechat_api_v3_key: '',
+  shop_url: '',
 };
 
 const asBool = (v: unknown, fallback = false) => (v == null ? fallback : Boolean(v));
@@ -84,6 +90,8 @@ function fromSettings(s: SystemSettings | undefined): FormState {
     retry_timeout_seconds: asNum(s['retry.timeout_seconds'], 300),
     tolerance_circuit_failures: asNum(s['tolerance.circuit_failures'], 3),
     tolerance_circuit_cooldown_seconds: asNum(s['tolerance.circuit_cooldown_seconds'], 300),
+    tolerance_health_check_enabled: asBool(s['tolerance.health_check_enabled'], true),
+    tolerance_health_check_cron: asStr(s['tolerance.health_check_cron'], '0 9 * * *'),
     proxy_global_enabled: asBool(s['proxy.global_enabled']),
     proxy_selection_mode: asStr(s['proxy.selection_mode'], 'fixed') === 'random' ? 'random' : 'fixed',
     proxy_global_id: asNum(s['proxy.global_id'], 0),
@@ -107,6 +115,7 @@ function fromSettings(s: SystemSettings | undefined): FormState {
     alipay_private_key: asStr(s['payment.alipay_private_key']),
     wechat_mch_id: asStr(s['payment.wechat_mch_id']),
     wechat_api_v3_key: asStr(s['payment.wechat_api_v3_key']),
+    shop_url: asStr(s['payment.shop_url']),
   };
 }
 
@@ -117,6 +126,8 @@ function toPayload(f: FormState): Partial<SystemSettings> {
     'retry.timeout_seconds': Number(f.retry_timeout_seconds) || 0,
     'tolerance.circuit_failures': Number(f.tolerance_circuit_failures) || 0,
     'tolerance.circuit_cooldown_seconds': Number(f.tolerance_circuit_cooldown_seconds) || 0,
+    'tolerance.health_check_enabled': f.tolerance_health_check_enabled,
+    'tolerance.health_check_cron': f.tolerance_health_check_cron,
     'proxy.global_enabled': f.proxy_global_enabled,
     'proxy.selection_mode': f.proxy_selection_mode,
     'proxy.global_id': Number(f.proxy_global_id) || 0,
@@ -140,6 +151,7 @@ function toPayload(f: FormState): Partial<SystemSettings> {
     'payment.alipay_private_key': f.alipay_private_key.trim(),
     'payment.wechat_mch_id': f.wechat_mch_id.trim(),
     'payment.wechat_api_v3_key': f.wechat_api_v3_key.trim(),
+    'payment.shop_url': f.shop_url.trim(),
   };
 }
 
@@ -214,6 +226,23 @@ export default function ConfigPage() {
             <NumberField label="请求超时（秒）" value={form.retry_timeout_seconds} min={30} onChange={(v) => set('retry_timeout_seconds', v)} />
             <NumberField label="熔断失败次数" value={form.tolerance_circuit_failures} min={1} onChange={(v) => set('tolerance_circuit_failures', v)} />
             <NumberField label="熔断冷却时间（秒）" value={form.tolerance_circuit_cooldown_seconds} min={30} onChange={(v) => set('tolerance_circuit_cooldown_seconds', v)} />
+            <Toggle label="启用账号健康巡检" checked={form.tolerance_health_check_enabled} onChange={(v) => set('tolerance_health_check_enabled', v)} />
+            <Field label="巡检时间">
+              <select
+                className="select"
+                value={form.tolerance_health_check_cron}
+                onChange={(e) => set('tolerance_health_check_cron', e.target.value)}
+                disabled={!form.tolerance_health_check_enabled}
+              >
+                <option value="0 */1 * * *">每 1 小时</option>
+                <option value="0 */6 * * *">每 6 小时</option>
+                <option value="0 9 * * *">每天 09:00</option>
+                <option value="0 8 * * *">每天 08:00</option>
+                <option value="0 10 * * *">每天 10:00</option>
+                <option value="0 12 * * *">每天 12:00</option>
+                <option value="0 18 * * *">每天 18:00</option>
+              </select>
+            </Field>
           </Section>
 
           <Section icon={<Database size={18} />} title="刷新与存储" desc="控制 OAuth 刷新窗口、全局代理和生成历史保留周期。">
@@ -318,6 +347,7 @@ export default function ConfigPage() {
             </div>
             <Field label="支付宝私钥"><textarea className="input font-mono text-small min-h-[96px]" value={form.alipay_private_key} onChange={(e) => set('alipay_private_key', e.target.value)} /></Field>
             <TextField label="微信 API v3 Key" value={form.wechat_api_v3_key} onChange={(v) => set('wechat_api_v3_key', v)} type="password" />
+            <TextField label="链动小铺店铺地址" value={form.shop_url} onChange={(v) => set('shop_url', v)} placeholder="https://shop.example.com" />
           </Section>
         </div>
       )}

@@ -47,6 +47,9 @@ func DefaultChatPriceFn(modelCode string) ChatPrice {
 
 // DefaultPriceFn 实现 PriceFunc。
 func DefaultPriceFn(modelCode string, kind provider.Kind, params map[string]any) int64 {
+	if modelCode == "gpt-image-2" && kind == provider.KindImage && shouldUseGPTWebRoute(params) {
+		return 100
+	}
 	if v, ok := DefaultPriceTable[modelCode]; ok {
 		// 视频：按秒倍率
 		if kind == provider.KindVideo {

@@ -34,7 +34,7 @@ func NewCDKService(db *gorm.DB, b *BillingService) *CDKService {
 func (s *CDKService) Redeem(ctx context.Context, userID uint64, code string) (int64, error) {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if code == "" {
-		return 0, errcode.InvalidParam
+		return 0, errcode.InvalidParam.WithMsg("兑换码不能为空")
 	}
 
 	var grantedPoints int64
@@ -117,7 +117,7 @@ func (s *CDKService) Redeem(ctx context.Context, userID uint64, code string) (in
 // GenerateBatch 管理后台生成 CDK 批次。
 func (s *CDKService) GenerateBatch(ctx context.Context, adminID uint64, batchNo, name string, points int64, qty, perUserLimit int, expireAt *time.Time) (*model.RedeemCodeBatch, error) {
 	if points <= 0 || qty <= 0 || qty > 100000 {
-		return nil, errcode.InvalidParam
+		return nil, errcode.InvalidParam.WithMsg("points 和 qty 必须为正整数，qty 上限 100000")
 	}
 	rewardJSON, _ := json.Marshal(map[string]any{"points": points})
 
@@ -147,6 +147,100 @@ func (s *CDKService) GenerateBatch(ctx context.Context, adminID uint64, batchNo,
 		return nil, errcode.DBError.Wrap(err)
 	}
 	return batch, nil
+}
+
+// ListBatches 管理后台分页查询 CDK 批次。
+func (s *CDKService) ListBatches(ctx context.Context, keyword string, status *int8, page, pageSize int) ([]model.RedeemCodeBatch, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 20
+	}
+
+	var batches []model.RedeemCodeBatch
+	var total int64
+
+	q := s.db.WithContext(ctx).Model(&model.RedeemCodeBatch{})
+	if keyword != "" {
+		kw := "%" + keyword + "%"
+		q = q.Where("batch_no LIKE ? OR name LIKE ?", kw, kw)
+	}
+	if status != nil {
+		q = q.Where("status = ?", *status)
+	}
+
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, errcode.DBError.Wrap(err)
+	}
+	if err := q.Order("id DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&batches).Error; err != nil {
+		return nil, 0, errcode.DBError.Wrap(err)
+	}
+	return batches, total, nil
+}
+
+// ListCodes 管理后台按批次分页查询 CDK 码列表。
+func (s *CDKService) ListCodes(ctx context.Context, batchID uint64, status *int8, page, pageSize int) ([]model.RedeemCode, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 20
+	}
+
+	var codes []model.RedeemCode
+	var total int64
+
+	q := s.db.WithContext(ctx).Model(&model.RedeemCode{}).Where("batch_id = ?", batchID)
+	if status != nil {
+		q = q.Where("status = ?", *status)
+	}
+
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, errcode.DBError.Wrap(err)
+	}
+	if err := q.Order("id ASC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&codes).Error; err != nil {
+		return nil, 0, errcode.DBError.Wrap(err)
+	}
+	return codes, total, nil
+}
+
+// ToggleBatchStatus 管理后台切换批次启用/停用状态。
+func (s *CDKService) ToggleBatchStatus(ctx context.Context, batchID uint64, status int8) error {
+	if status != model.PromoStatusEnabled && status != model.PromoStatusDisabled {
+		return errcode.InvalidParam.WithMsg("status 仅支持 0 或 1")
+	}
+	result := s.db.WithContext(ctx).Model(&model.RedeemCodeBatch{}).
+		Where("id = ?", batchID).Update("status", status)
+	if result.Error != nil {
+		return errcode.DBError.Wrap(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return errcode.InvalidParam.WithMsg("批次不存在")
+	}
+	return nil
+}
+
+// DeleteBatch 管理后台删除 CDK 批次及其所有码。
+func (s *CDKService) DeleteBatch(ctx context.Context, batchID uint64) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 先删码，再删批次
+		if err := tx.Where("batch_id = ?", batchID).Delete(&model.RedeemCode{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id = ?", batchID).Delete(&model.RedeemCodeBatch{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return errcode.DBError.Wrap(err)
+	}
+	return nil
 }
 
 // === helpers ===

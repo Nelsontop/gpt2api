@@ -185,13 +185,24 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 	if t.Kind == "video" {
 		timeout = 15 * time.Minute
 	}
-	if t.Provider == model.ProviderGPT && t.Kind == string(provider.KindImage) && strings.EqualFold(t.ModelCode, "gpt-image-2") && shouldUseGPTWebRoute(params) {
-		timeout = 10 * time.Minute
+	isGPTImageWebRoute := t.Provider == model.ProviderGPT && t.Kind == string(provider.KindImage) && strings.EqualFold(t.ModelCode, "gpt-image-2") && shouldUseGPTWebRoute(params)
+	if isGPTImageWebRoute {
+		// web 路线串行生成每张图片；单张超时基数从配置读取，按数量倍增
+		perImageTimeout := 10 * time.Minute
+		if s.cfg != nil {
+			perImageTimeout = s.cfg.RetryTimeout(ctx, perImageTimeout)
+		}
+		timeout = perImageTimeout * time.Duration(t.Count)
+		if timeout > 30*time.Minute {
+			timeout = 30 * time.Minute
+		}
 	}
 	maxAttempts := 3
 	retryDelay := 800 * time.Millisecond
 	if s.cfg != nil {
-		timeout = s.cfg.RetryTimeout(ctx, timeout)
+		if !isGPTImageWebRoute {
+			timeout = s.cfg.RetryTimeout(ctx, timeout)
+		}
 		maxAttempts = s.cfg.RetryMaxAttempts(ctx)
 		retryDelay = s.cfg.RetryBaseDelay(ctx)
 	}
@@ -206,10 +217,11 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		picked, err := s.pickAccountForTask(ctx, t, params)
 		if err != nil {
+			diag := s.accountPickDiagnostic(ctx, t.Provider, t)
 			if lastErr != nil {
-				s.failTask(ctx, t, fmt.Sprintf("provider call: %v", lastErr))
+				s.failTask(ctx, t, fmt.Sprintf("provider call: %v; retry选账号失败: %s", lastErr, diag))
 			} else {
-				s.failTask(ctx, t, fmt.Sprintf("pick account: %v", err))
+				s.failTask(ctx, t, fmt.Sprintf("pick account: %v; %s", err, diag))
 			}
 			return
 		}
@@ -217,6 +229,13 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 		if err := s.repo.SetRunning(ctx, t.TaskID, acc.ID); err != nil {
 			log.Warn("set running failed", zap.Error(err))
 		}
+		// 记录请求开始时间，用于计算响应时间
+		reqStart := time.Now()
+		// 确保请求完成后释放账号并发计数并记录响应时间
+		defer func(start time.Time, accountID uint64) {
+			s.pool.RecordLatency(accountID, time.Since(start))
+			s.pool.ReleaseConcurrent(accountID)
+		}(reqStart, acc.ID)
 
 		provReq := &provider.Request{
 			TaskID:    t.TaskID,
@@ -235,7 +254,7 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 		}
 		if acc.BaseURL != nil {
 			provReq.BaseURL = *acc.BaseURL
-		} else if accountRequiresCodexRoute(t, params) && isCodexOAuthAccount(acc) {
+		} else if accountRequiresCodexRoute(t, params) && isCodexOAuthAccount(acc) && !shouldUseGPTWebRoute(params) {
 			provReq.BaseURL = "https://chatgpt.com/backend-api/codex"
 		}
 		if proxyURL, perr := s.resolveProxyURL(ctx, acc); perr == nil {
@@ -247,12 +266,13 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 			cred, derr := s.providerCredential(ctx, acc, provReq.ProxyURL)
 			if derr != nil {
 				lastErr = derr
+				s.pool.MarkSuspect(acc.ID, acc.Weight)
 				if isFatalOAuthRefreshError(derr) {
 					s.disableProviderAccount(ctx, acc, derr.Error())
 				} else {
 					s.markProviderFailed(ctx, acc, derr.Error(), 30*time.Minute)
 				}
-				releaseAcc(acc)
+				// releaseAcc 已改为 defer s.pool.ReleaseConcurrent(acc.ID)
 				acc = nil
 				if attempt == maxAttempts || !retryableProviderError(derr) {
 					s.failTask(ctx, t, fmt.Sprintf("provider call: %v", derr))
@@ -272,7 +292,10 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 			break
 		}
 		lastErr = err
-		if isUsageLimitReachedError(err) {
+		s.pool.MarkSuspect(acc.ID, acc.Weight)
+		if isGPTWebAuth401Error(err) {
+			s.disableProviderAccount(ctx, acc, err.Error())
+		} else if isUsageLimitReachedError(err) {
 			s.markProviderQuotaLimited(ctx, acc, err.Error(), usageLimitResetAt(err))
 		} else if isTransientProviderPathError(t.Provider, err) {
 			s.pool.MarkTransientFailed(ctx, acc.ID, err.Error())
@@ -291,10 +314,11 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 	}
 	if res == nil {
 		releaseAcc(acc)
+		diag := s.accountPickDiagnostic(ctx, t.Provider, t)
 		if lastErr != nil {
-			s.failTask(ctx, t, fmt.Sprintf("provider call: %v", lastErr))
+			s.failTask(ctx, t, fmt.Sprintf("provider call: %v; retry选账号失败: %s", lastErr, diag))
 		} else {
-			s.failTask(ctx, t, "provider call failed")
+			s.failTask(ctx, t, fmt.Sprintf("provider call failed: %s", diag))
 		}
 		return
 	}
@@ -331,10 +355,15 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 		}
 		results = append(results, gr)
 	}
-	s.cacheResultAssets(ctx, t, acc, results)
+	if err := s.cacheResultAssets(ctx, t, acc, results); err != nil {
+		s.failTask(ctx, t, fmt.Sprintf("cache result asset: %v", err))
+		return
+	}
 
 	if err := s.repo.SetSucceeded(ctx, t.TaskID, results); err != nil {
 		log.Error("set succeeded failed", zap.Error(err))
+		s.failTask(ctx, t, fmt.Sprintf("set succeeded: %v", err))
+		return
 	}
 	s.updateAccountUsageMeta(ctx, acc, t, len(results))
 	if t.CostPoints > 0 {
@@ -416,17 +445,49 @@ func (s *GenerationService) pickAccountForTask(ctx context.Context, t *model.Gen
 	if t == nil {
 		return nil, errcode.NoAvailableAcc
 	}
-	if t.Provider != model.ProviderGPT || t.Kind != string(provider.KindImage) || !strings.EqualFold(t.ModelCode, "gpt-image-2") {
-		return s.pool.ReserveWhere(ctx, t.Provider, "round_robin", nil)
-	}
-	if accountRequiresCodexRoute(t, params) {
-		return s.pool.ReserveWhere(ctx, t.Provider, "round_robin", isCodexOAuthAccount)
-	}
-	return s.pool.ReserveWhere(ctx, t.Provider, "round_robin", func(acc *model.Account) bool {
+
+	// isAccountAvailable checks that an account is in a healthy, schedulable state.
+	isAccountAvailable := func(acc *model.Account) bool {
 		if acc == nil {
 			return false
 		}
-		return acc.AuthType == model.AuthTypeOAuth
+		if acc.Status != model.AccountStatusEnabled {
+			return false
+		}
+		if acc.LastTestStatus == model.AccountTestFail {
+			return false
+		}
+		if acc.CooldownUntil != nil && time.Now().UTC().Before(*acc.CooldownUntil) {
+			return false
+		}
+		if acc.AccessTokenExpiresAt != nil && time.Now().UTC().After(*acc.AccessTokenExpiresAt) {
+			return false
+		}
+		return true
+	}
+
+	if t.Provider != model.ProviderGPT || t.Kind != string(provider.KindImage) || !strings.EqualFold(t.ModelCode, "gpt-image-2") {
+		// 使用 PickConcurrent 支持多并发，替代 ReserveWhere
+		return s.pool.PickConcurrent(ctx, t.Provider, isAccountAvailable)
+	}
+	if accountRequiresCodexRoute(t, params) {
+		// Codex 路线优先找 Codex 账号；没有则 fallback 到 web 路线用任意 OAuth 账号
+		acc, err := s.pool.PickConcurrent(ctx, t.Provider, func(acc *model.Account) bool {
+			return isCodexOAuthAccount(acc) && isAccountAvailable(acc)
+		})
+		if err == nil && acc != nil {
+			return acc, nil
+		}
+		// 无 Codex 账号，fallback 到 web 路线：标记 force_web_route 让 provider 走 web
+		if params != nil {
+			params["_force_web_route"] = true
+		}
+	}
+	return s.pool.PickConcurrent(ctx, t.Provider, func(acc *model.Account) bool {
+		if acc == nil {
+			return false
+		}
+		return acc.AuthType == model.AuthTypeOAuth && isAccountAvailable(acc)
 	})
 }
 
@@ -438,6 +499,11 @@ func accountRequiresCodexRoute(t *model.GenerationTask, params map[string]any) b
 }
 
 func shouldUseGPTWebRoute(params map[string]any) bool {
+	if params != nil {
+		if v, ok := params["_force_web_route"]; ok && v == true {
+			return true
+		}
+	}
 	tier := strings.ToUpper(strings.TrimSpace(strParamAny(params, "resolution", strParamAny(params, "size_tier", ""))))
 	if tier == "" {
 		size := strParamAny(params, "size", "")
@@ -491,56 +557,28 @@ func (s *GenerationService) markProviderFailed(ctx context.Context, acc *model.A
 			}
 		}
 	}
-	acc.ErrorCount++
-	if threshold > 1 && int64(acc.ErrorCount) < threshold {
+	// 使用 DB 中的 error_count+1 来判断是否达到阈值（避免内存与 DB 不一致）
+	dbErrCount := int64(acc.ErrorCount) + 1 // 预估递增后的值
+	if threshold > 1 && dbErrCount < threshold {
 		cooldown = 0
 	}
 	s.pool.MarkFailed(ctx, acc.ID, reason, cooldown)
 }
 
 func (s *GenerationService) disableProviderAccount(ctx context.Context, acc *model.Account, reason string) {
-	if acc == nil || s.pool == nil || s.pool.repo == nil {
+	if acc == nil || s.pool == nil {
 		return
 	}
-	now := time.Now().UTC()
-	fields := map[string]any{
-		"status":           model.AccountStatusDisabled,
-		"last_error":       truncate(reason, 240),
-		"last_test_status": model.AccountTestFail,
-		"last_test_error":  truncate(reason, 240),
-		"last_test_at":     now,
-		"cooldown_until":   nil,
-		"error_count":      gorm.Expr("error_count + 1"),
-	}
-	if err := s.pool.repo.Update(ctx, acc.ID, fields); err != nil {
-		logger.FromCtx(ctx).Warn("account.disable_failed", zap.Uint64("account_id", acc.ID), zap.Error(err))
-		return
-	}
+	s.pool.DisableAccount(ctx, acc.ID, reason)
 	acc.Status = model.AccountStatusDisabled
-	s.pool.Reload(acc.Provider)
-	logger.FromCtx(ctx).Warn("account.disabled_after_oauth_refresh_401", zap.Uint64("account_id", acc.ID), zap.String("provider", acc.Provider), zap.String("reason", truncate(reason, 240)))
 }
 
 func (s *GenerationService) markProviderQuotaLimited(ctx context.Context, acc *model.Account, reason string, until time.Time) {
-	if acc == nil || s.pool == nil || s.pool.repo == nil {
+	if acc == nil || s.pool == nil {
 		return
 	}
-	fields := map[string]any{
-		"status":      model.AccountStatusBroken,
-		"last_error":  truncate(reason, 240),
-		"error_count": gorm.Expr("error_count + 1"),
-	}
-	if until.IsZero() {
-		until = time.Now().UTC().Add(24 * time.Hour)
-	}
-	fields["cooldown_until"] = until.UTC()
-	if err := s.pool.repo.Update(ctx, acc.ID, fields); err != nil {
-		logger.FromCtx(ctx).Warn("account.quota_limit_failed", zap.Uint64("account_id", acc.ID), zap.Error(err))
-		return
-	}
+	s.pool.MarkQuotaLimited(ctx, acc.ID, reason, until)
 	acc.Status = model.AccountStatusBroken
-	s.pool.Reload(acc.Provider)
-	logger.FromCtx(ctx).Warn("account.quota_limited", zap.Uint64("account_id", acc.ID), zap.String("provider", acc.Provider), zap.Time("cooldown_until", until), zap.String("reason", truncate(reason, 240)))
 }
 
 func sleepBeforeRetry(ctx context.Context, base time.Duration, attempt int) {
@@ -675,9 +713,9 @@ func (s *GenerationService) gptOAuthAccessToken(ctx context.Context, acc *model.
 	if raw, err := json.Marshal(meta); err == nil {
 		updates["oauth_meta"] = string(raw)
 	}
-	if s.pool != nil && s.pool.repo != nil {
-		if err := s.pool.repo.Update(ctx, acc.ID, updates); err != nil {
-			return "", errcode.DBError.Wrap(err)
+	if s.pool != nil {
+		if err := s.pool.UpdateAccountFields(ctx, acc.ID, updates); err != nil {
+			return "", err
 		}
 	}
 	acc.AccessTokenEnc = atEnc
@@ -773,13 +811,13 @@ func (s *GenerationService) resolveProxyURL(ctx context.Context, acc *model.Acco
 	return u.String(), nil
 }
 
-func (s *GenerationService) cacheResultAssets(ctx context.Context, t *model.GenerationTask, acc *model.Account, results []*model.GenerationResult) {
+func (s *GenerationService) cacheResultAssets(ctx context.Context, t *model.GenerationTask, acc *model.Account, results []*model.GenerationResult) error {
 	if len(results) == 0 || s.cfg == nil || s.aes == nil || acc == nil {
-		return
+		return nil
 	}
 	driver := strings.ToLower(strings.TrimSpace(s.cfg.GetString(ctx, "storage.result_cache_driver", "local")))
 	if driver == "off" || driver == "none" {
-		return
+		return nil
 	}
 	if driver == "oss" && !s.cfg.GetBool(ctx, "oss.enabled", false) {
 		driver = "local"
@@ -790,23 +828,31 @@ func (s *GenerationService) cacheResultAssets(ctx context.Context, t *model.Gene
 	plain, err := s.aes.Decrypt(acc.CredentialEnc)
 	if err != nil {
 		logger.FromCtx(ctx).Warn("asset.cache.decrypt_failed", zap.Error(err))
-		return
+		return nil
 	}
 	cookie := buildCookieForAssetDownload(string(plain))
 	for i, gr := range results {
 		if u, ok := s.cacheOneAsset(ctx, driver, cookie, gr.URL, t.TaskID, i, false); ok {
 			gr.URL = u
+		} else if isDataURL(gr.URL) {
+			gr.URL = ""
+			return fmt.Errorf("cache data URL result %d failed", i)
 		}
 		if gr.ThumbURL != nil && *gr.ThumbURL != "" {
 			if u, ok := s.cacheOneAsset(ctx, driver, cookie, *gr.ThumbURL, t.TaskID, i, true); ok {
 				gr.ThumbURL = &u
+			} else if isDataURL(*gr.ThumbURL) {
+				empty := ""
+				gr.ThumbURL = &empty
+				return fmt.Errorf("cache data URL thumbnail %d failed", i)
 			}
 		}
 	}
+	return nil
 }
 
 func (s *GenerationService) cacheOneAsset(ctx context.Context, driver, cookie, rawURL, taskID string, seq int, thumb bool) (string, bool) {
-	if strings.HasPrefix(strings.TrimSpace(rawURL), "data:") {
+	if isDataURL(rawURL) {
 		return s.cacheDataURLAsset(ctx, driver, rawURL, taskID, seq, thumb)
 	}
 	source := normalizeAssetSourceURL(rawURL)
@@ -869,6 +915,10 @@ func (s *GenerationService) cacheOneAsset(ctx context.Context, driver, cookie, r
 		}
 	}
 	return localURL, true
+}
+
+func isDataURL(rawURL string) bool {
+	return strings.HasPrefix(strings.TrimSpace(rawURL), "data:")
 }
 
 func (s *GenerationService) cacheDataURLAsset(ctx context.Context, driver, rawURL, taskID string, seq int, thumb bool) (string, bool) {
@@ -1234,20 +1284,46 @@ func retryableProviderError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	return isFatalOAuthRefreshError(err) ||
-		isUsageLimitReachedError(err) ||
-		strings.Contains(msg, "http 429") ||
-		strings.Contains(msg, "too many requests") ||
-		isGrokRetryableForbiddenError(msg)
-}
-
-func isTransientProviderPathError(provider string, err error) bool {
-	if err == nil || provider != model.ProviderGROK {
+	// context 取消/超时不是账号级问题，不可重试
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "http 403") && isGrokRetryableForbiddenError(msg)
+	if strings.Contains(msg, "context canceled") || strings.Contains(msg, "context deadline exceeded") {
+		return false
+	}
+	return isFatalOAuthRefreshError(err) ||
+		isGPTWebAuth401Error(err) ||
+		isUsageLimitReachedError(err) ||
+		strings.Contains(msg, "http 429") ||
+		strings.Contains(msg, "too many requests") ||
+		isGrokRetryableForbiddenError(msg) ||
+		isGPTWebRetryableForbiddenError(msg) ||
+		strings.Contains(msg, "http 403") ||
+		strings.Contains(msg, "http 401") ||
+		strings.Contains(msg, "forbidden") ||
+		strings.Contains(msg, "cloudflare") ||
+		strings.Contains(msg, "just a moment") ||
+		strings.Contains(msg, "token_revoked") ||
+		strings.Contains(msg, "invalidated oauth token") ||
+		strings.Contains(msg, "invalid argument") ||
+		strings.Contains(msg, "returned 0 image") ||
+		strings.Contains(msg, "http 5") // 5xx
+}
+
+func isTransientProviderPathError(provider string, err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	switch provider {
+	case model.ProviderGROK:
+		return strings.Contains(msg, "http 403") && isGrokRetryableForbiddenError(msg)
+	case model.ProviderGPT:
+		return isGPTWebRetryableForbiddenError(msg)
+	default:
+		return false
+	}
 }
 
 func isGrokRetryableForbiddenError(msg string) bool {
@@ -1262,6 +1338,25 @@ func isGrokRetryableForbiddenError(msg string) bool {
 		strings.Contains(msg, "cloudflare") ||
 		strings.Contains(msg, "just a moment") ||
 		strings.Contains(msg, "request rejected by anti-bot rules")
+}
+
+func isGPTWebRetryableForbiddenError(msg string) bool {
+	if msg == "" || !strings.Contains(msg, "gpt image2 web") {
+		return false
+	}
+	return (strings.Contains(msg, " 403:") && strings.Contains(msg, "<html")) ||
+		strings.Contains(msg, "cloudflare") ||
+		strings.Contains(msg, "cf-mitigated") ||
+		strings.Contains(msg, "just a moment") ||
+		strings.Contains(msg, "request rejected")
+}
+
+func isGPTWebAuth401Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "gpt image2 web") && strings.Contains(msg, "401")
 }
 
 func isUsageLimitReachedError(err error) bool {
@@ -1295,7 +1390,11 @@ func providerCooldown(err error) time.Duration {
 		return 5 * time.Minute
 	}
 	msg := strings.ToLower(err.Error())
-	if isGrokRetryableForbiddenError(msg) {
+	if isGrokRetryableForbiddenError(msg) || isGPTWebRetryableForbiddenError(msg) {
+		return 0
+	}
+	// 服务端暂时拥堵（如 "正在处理图片"），不熔断，仅记录错误
+	if strings.Contains(msg, "returned 0 image") {
 		return 0
 	}
 	switch {
@@ -1305,8 +1404,6 @@ func providerCooldown(err error) time.Duration {
 		strings.Contains(msg, "cloudflare"), strings.Contains(msg, "just a moment"),
 		strings.Contains(msg, "anti-bot"), strings.Contains(msg, "request rejected"):
 		return 2 * time.Hour
-	case strings.Contains(msg, "anti-bot"), strings.Contains(msg, "request rejected"):
-		return 2 * time.Hour
 	default:
 		return 10 * time.Minute
 	}
@@ -1315,6 +1412,8 @@ func providerCooldown(err error) time.Duration {
 func userFacingGenerationError(reason string) string {
 	msg := strings.ToLower(reason)
 	switch {
+	case isGPTWebRetryableForbiddenError(msg):
+		return "ChatGPT Web 触发风控挑战，请更换可用代理或账号后再试"
 	case strings.Contains(msg, "just a moment"), strings.Contains(msg, "cloudflare"):
 		return "GROK 触发了 Cloudflare 验证，请配置可用的 CF Cookie/代理后再试"
 	case strings.Contains(msg, "grok video http 429"), strings.Contains(msg, "too many requests"):
@@ -1324,4 +1423,53 @@ func userFacingGenerationError(reason string) string {
 	default:
 		return reason
 	}
+}
+
+// accountPickDiagnostic 在"选不到账号"时查询 DB 拿到各状态账号数量，
+// 区分"根本没有账号"和"有账号但全部不可用"。
+func (s *GenerationService) accountPickDiagnostic(ctx context.Context, prov string, t *model.GenerationTask) string {
+	if s.pool == nil {
+		return ""
+	}
+	d, err := s.pool.ProviderAccountDiagnostic(ctx, prov)
+	if err != nil || d == nil {
+		return ""
+	}
+	if d.Total == 0 {
+		return fmt.Sprintf("provider %s 无任何账号(需添加账号)", prov)
+	}
+
+	parts := []string{fmt.Sprintf("共%d个账号", d.Total)}
+	if d.Disabled > 0 {
+		parts = append(parts, fmt.Sprintf("%d已禁用", d.Disabled))
+	}
+	if d.Banned > 0 {
+		parts = append(parts, fmt.Sprintf("%d封禁", d.Banned))
+	}
+	if d.Broken > 0 {
+		parts = append(parts, fmt.Sprintf("%d熔断", d.Broken))
+	}
+	if d.InCooldown > 0 {
+		parts = append(parts, fmt.Sprintf("%d冷却中", d.InCooldown))
+	}
+	if d.TestFailed > 0 {
+		parts = append(parts, fmt.Sprintf("%d测试失败", d.TestFailed))
+	}
+	if d.Untested > 0 {
+		parts = append(parts, fmt.Sprintf("%d未检测", d.Untested))
+	}
+	if d.TokenExpired > 0 {
+		parts = append(parts, fmt.Sprintf("%d令牌过期", d.TokenExpired))
+	}
+
+	// GPT image-2 需要 OAuth 账号，单独显示 OAuth 可用数
+	if t.Provider == model.ProviderGPT && t.Kind == string(provider.KindImage) && strings.EqualFold(t.ModelCode, "gpt-image-2") {
+		if d.OAuthCount > 0 {
+			parts = append(parts, fmt.Sprintf("OAuth %d个(可用%d)", d.OAuthCount, d.OAuthAvailable))
+		} else {
+			parts = append(parts, "无OAuth账号(需OAuth类型)")
+		}
+	}
+
+	return strings.Join(parts, ", ")
 }

@@ -7,8 +7,8 @@ import (
 	"github.com/kleinai/backend/internal/dto"
 	"github.com/kleinai/backend/internal/middleware"
 	"github.com/kleinai/backend/internal/service"
-	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 // AuthHandler 用户端 auth handler。
@@ -26,7 +26,7 @@ func NewAuthHandler(a *service.AuthService, u *service.UserService) *AuthHandler
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req dto.RegisterReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	u, tok, err := h.auth.Register(c.Request.Context(), &req, c.ClientIP())
@@ -46,7 +46,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req dto.LoginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	u, tok, err := h.auth.Login(c.Request.Context(), &req, c.ClientIP())
@@ -65,7 +65,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	var req dto.RefreshReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	tok, err := h.auth.Refresh(c.Request.Context(), req.RefreshToken)
@@ -97,7 +97,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	var req dto.ChangePasswordReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	uid := middleware.MustUID(c)

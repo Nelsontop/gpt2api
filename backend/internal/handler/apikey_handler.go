@@ -11,6 +11,7 @@ import (
 	"github.com/kleinai/backend/internal/service"
 	"github.com/kleinai/backend/pkg/errcode"
 	"github.com/kleinai/backend/pkg/response"
+	"github.com/kleinai/backend/pkg/validator"
 )
 
 // APIKeyHandler 用户端 API Key handler。
@@ -27,7 +28,7 @@ func NewAPIKeyHandler(svc *service.APIKeyService) *APIKeyHandler {
 func (h *APIKeyHandler) Create(c *gin.Context) {
 	var req dto.APIKeyCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Fail(c, errcode.InvalidParam.Wrap(err))
+		response.Fail(c, validator.Translate(err))
 		return
 	}
 	uid := middleware.MustUID(c)
@@ -54,7 +55,7 @@ func (h *APIKeyHandler) List(c *gin.Context) {
 func (h *APIKeyHandler) Toggle(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的 ID"))
 		return
 	}
 	enable := c.DefaultQuery("enable", "1") == "1"
@@ -70,7 +71,7 @@ func (h *APIKeyHandler) Toggle(c *gin.Context) {
 func (h *APIKeyHandler) Delete(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		response.Fail(c, errcode.InvalidParam)
+		response.Fail(c, errcode.InvalidParam.WithMsg("无效的 ID"))
 		return
 	}
 	uid := middleware.MustUID(c)

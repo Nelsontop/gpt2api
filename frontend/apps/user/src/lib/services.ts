@@ -14,6 +14,7 @@ import type {
   PublicModel,
   RedeemCDKResp,
   RegisterResp,
+  SystemSettings,
   TextGenerationResp,
   TokenPair,
   WalletLog,
@@ -101,4 +102,8 @@ export const genApi = {
     }),
   deleteHistory: (scope: 'before_3d' | 'before_7d' | 'failed' | 'all') =>
     request<{ deleted: number }>({ method: 'DELETE', url: '/gen/history', params: { scope } }),
+};
+
+export const systemApi = {
+  get: () => request<SystemSettings>({ url: '/system/settings', method: 'GET' }),
 };
