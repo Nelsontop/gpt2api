@@ -6,11 +6,11 @@
 
 一站式覆盖文字、图片、视频生成，多账号池调度 · OpenAI 协议兼容 · 积分计费 · Docker 一键部署
 
-[![Stars](https://img.shields.io/github/stars/432539/gpt2api?style=flat-square&logo=github&color=orange)](https://github.com/432539/gpt2api/stargazers)
-[![Forks](https://img.shields.io/github/forks/432539/gpt2api?style=flat-square&logo=github&color=blue)](https://github.com/432539/gpt2api/network/members)
-[![Issues](https://img.shields.io/github/issues/432539/gpt2api?style=flat-square&logo=github)](https://github.com/432539/gpt2api/issues)
-[![Last Commit](https://img.shields.io/github/last-commit/432539/gpt2api?style=flat-square&logo=git&color=success)](https://github.com/432539/gpt2api/commits/main)
-[![Release](https://img.shields.io/badge/release-v2.1.0-brightgreen?style=flat-square)](https://github.com/432539/gpt2api/releases)
+[![Stars](https://img.shields.io/github/stars/Nelsontop/gpt2api?style=flat-square&logo=github&color=orange)](https://github.com/Nelsontop/gpt2api/stargazers)
+[![Forks](https://img.shields.io/github/forks/Nelsontop/gpt2api?style=flat-square&logo=github&color=blue)](https://github.com/Nelsontop/gpt2api/network/members)
+[![Issues](https://img.shields.io/github/issues/Nelsontop/gpt2api?style=flat-square&logo=github)](https://github.com/Nelsontop/gpt2api/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/Nelsontop/gpt2api?style=flat-square&logo=git&color=success)](https://github.com/Nelsontop/gpt2api/commits/main)
+[![Release](https://img.shields.io/badge/release-v2.1.0-brightgreen?style=flat-square)](https://github.com/Nelsontop/gpt2api/releases)
 [![Go](https://img.shields.io/badge/Go-1.24-00ADD8?style=flat-square&logo=go)](https://go.dev/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react)](https://react.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker)](https://docs.docker.com/compose/)
@@ -104,7 +104,7 @@
 ### 1. 拉取代码
 
 ```bash
-git clone https://github.com/432539/gpt2api.git
+git clone https://github.com/Nelsontop/gpt2api.git
 cd gpt2api
 ```
 
@@ -297,13 +297,13 @@ pnpm --filter @kleinai/admin dev    # http://localhost:5174
 
 ## 🌟 Star 趋势
 
-[![Star History Chart](https://api.star-history.com/svg?repos=432539/gpt2api&type=Date)](https://star-history.com/#432539/gpt2api&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Nelsontop/gpt2api&type=Date)](https://star-history.com/#Nelsontop/gpt2api&Date)
 
 如果这个项目对你有帮助，欢迎点一个 ⭐ 支持持续更新。
 
 ## 💬 社区与交流
 
-- GitHub Issues：[https://github.com/432539/gpt2api/issues](https://github.com/432539/gpt2api/issues)
+- GitHub Issues：[https://github.com/Nelsontop/gpt2api/issues](https://github.com/Nelsontop/gpt2api/issues)
 - 技术交流 QQ 群：`382446`
 - 官网：[www.gpt2api.com](https://www.gpt2api.com/)
 
