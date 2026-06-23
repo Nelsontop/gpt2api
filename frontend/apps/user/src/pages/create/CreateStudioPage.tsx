@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import {
   ArrowUp,
   ArrowUpLeft,
@@ -10,16 +10,13 @@ import {
   ChevronLeft,
   ChevronRight,
   FileImage,
-  Image,
   Loader2,
   Maximize2,
   Mic,
   MoreHorizontal,
   Paperclip,
   Play,
-  Sparkles,
   Trash2,
-  Video,
   X,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -33,12 +30,6 @@ import { useAuthStore } from '../../stores/auth';
 import { toast } from '../../stores/toast';
 
 type StudioMode = 'image' | 'text' | 'video';
-
-const MODES: Array<{ value: StudioMode; label: string; icon: typeof Image }> = [
-  { value: 'image', label: '图片', icon: Image },
-  { value: 'text', label: '文字', icon: Sparkles },
-  { value: 'video', label: '视频', icon: Video },
-];
 
 const GENERATING_PHRASES = [
   '正在为您设计中...',
@@ -176,7 +167,6 @@ photorealistic, ultra detailed, cinematic studio lighting, realistic figurine, c
 
 export default function CreateStudioPage() {
   const location = useLocation();
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const ensureLoggedIn = useEnsureLoggedIn();
   const refreshMe = useAuthStore((s) => s.refreshMe);
@@ -335,6 +325,7 @@ export default function CreateStudioPage() {
       if (mode === 'text') createText.mutate();
       else if (mode === 'video') createVideo.mutate();
       else createImage.mutate();
+      toast.info('已开始生成');
     }, '登录后即可开始创作');
   };
 
@@ -376,9 +367,8 @@ export default function CreateStudioPage() {
   return (
     <div className="mx-auto min-h-screen w-full max-w-[1500px] px-4 pb-12 pt-10 sm:px-8 lg:px-12">
       <section className="mx-auto max-w-[760px]">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-6 flex items-center">
           <h1 className="text-[28px] font-medium tracking-normal text-neutral-950">{modeTitle(mode)}</h1>
-          <ModeSwitch mode={mode} onChange={(next) => navigate(`/create/${next}`)} />
         </div>
 
         <div className="rounded-[28px] border border-neutral-200 bg-white p-4 shadow-[0_18px_55px_rgba(15,23,42,.10)]">
@@ -436,7 +426,7 @@ export default function CreateStudioPage() {
               <button
                 type="button"
                 onClick={submit}
-                disabled={!!inProgress || createImage.isPending || createVideo.isPending || createText.isPending}
+                disabled={!prompt.trim()}
                 className="grid h-10 w-10 place-items-center rounded-full bg-neutral-950 text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
                 title="生成"
               >
@@ -554,30 +544,6 @@ export default function CreateStudioPage() {
         )}
       </section>
       {preview && <PreviewLightbox preview={preview} onClose={() => setPreview(null)} />}
-    </div>
-  );
-}
-
-function ModeSwitch({ mode, onChange }: { mode: StudioMode; onChange: (mode: StudioMode) => void }) {
-  return (
-    <div className="inline-flex rounded-full bg-neutral-100 p-1">
-      {MODES.map((m) => {
-        const Icon = m.icon;
-        return (
-          <button
-            key={m.value}
-            type="button"
-            onClick={() => onChange(m.value)}
-            className={clsx(
-              'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm transition',
-              mode === m.value ? 'bg-white text-neutral-950 shadow-sm' : 'text-neutral-600 hover:text-neutral-950',
-            )}
-          >
-            <Icon size={15} />
-            {m.label}
-          </button>
-        );
-      })}
     </div>
   );
 }
