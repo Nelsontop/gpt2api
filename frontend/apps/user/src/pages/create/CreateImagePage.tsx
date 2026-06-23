@@ -196,7 +196,7 @@ export default function CreateImagePage() {
           <button
             className="btn btn-primary btn-xl btn-block"
             onClick={submitGenerate}
-            disabled={!prompt.trim()}
+            disabled={createMut.isPending || !!inProgress || !prompt.trim()}
           >
             {createMut.isPending || inProgress ? (
               <><Loader2 size={18} className="animate-spin" />生成中…</>
@@ -224,7 +224,7 @@ export default function CreateImagePage() {
               <button
                 className="btn btn-outline btn-md"
                 onClick={submitGenerate}
-                disabled={!prompt.trim()}
+                disabled={createMut.isPending || !!inProgress}
               >
                 <RefreshCw size={16} /> 再来一组
               </button>
