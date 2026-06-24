@@ -61,6 +61,12 @@ func (s *AccountAdminService) Create(ctx context.Context, adminID uint64, req *d
 		} else {
 			credPlain = " "
 		}
+	case model.AuthTypeAT:
+		at := strings.TrimSpace(req.AccessToken)
+		if at == "" {
+			return nil, errcode.InvalidParam.WithMsg("请填写 access_token")
+		}
+		credPlain = " "
 	default:
 		credPlain = strings.TrimSpace(req.Credential)
 		if req.Provider == model.ProviderGROK && req.AuthType == model.AuthTypeCookie {
@@ -97,17 +103,31 @@ func (s *AccountAdminService) Create(ctx context.Context, adminID uint64, req *d
 	if req.Remark != "" {
 		a.Remark = strPtr(req.Remark)
 	}
-	if req.AuthType == model.AuthTypeOAuth {
-		rt := strings.TrimSpace(req.RefreshToken)
-		if rt == "" {
-			rt = strings.TrimSpace(req.Credential)
-		}
-		if rt != "" {
-			rtEnc, err := s.aes.Encrypt([]byte(rt))
-			if err != nil {
-				return nil, errcode.Internal.Wrap(err)
+	if req.AuthType == model.AuthTypeOAuth || req.AuthType == model.AuthTypeAT {
+		if req.AuthType == model.AuthTypeOAuth {
+			rt := strings.TrimSpace(req.RefreshToken)
+			if rt == "" {
+				rt = strings.TrimSpace(req.Credential)
 			}
-			a.RefreshTokenEnc = rtEnc
+			if rt != "" {
+				rtEnc, err := s.aes.Encrypt([]byte(rt))
+				if err != nil {
+					return nil, errcode.Internal.Wrap(err)
+				}
+				a.RefreshTokenEnc = rtEnc
+			}
+			if st := strings.TrimSpace(req.SessionToken); st != "" {
+				stEnc, err := s.aes.Encrypt([]byte(st))
+				if err != nil {
+					return nil, errcode.Internal.Wrap(err)
+				}
+				a.SessionTokenEnc = stEnc
+			}
+			if req.ClientID != "" {
+				b, _ := json.Marshal(map[string]any{"client_id": req.ClientID})
+				ms := string(b)
+				a.OAuthMeta = &ms
+			}
 		}
 		if at := strings.TrimSpace(req.AccessToken); at != "" {
 			atEnc, err := s.aes.Encrypt([]byte(at))
@@ -119,18 +139,6 @@ func (s *AccountAdminService) Create(ctx context.Context, adminID uint64, req *d
 				t := time.Unix(exp, 0).UTC()
 				a.AccessTokenExpiresAt = &t
 			}
-		}
-		if st := strings.TrimSpace(req.SessionToken); st != "" {
-			stEnc, err := s.aes.Encrypt([]byte(st))
-			if err != nil {
-				return nil, errcode.Internal.Wrap(err)
-			}
-			a.SessionTokenEnc = stEnc
-		}
-		if req.ClientID != "" {
-			b, _ := json.Marshal(map[string]any{"client_id": req.ClientID})
-			ms := string(b)
-			a.OAuthMeta = &ms
 		}
 	}
 	if req.Provider == model.ProviderGROK && req.AuthType == model.AuthTypeCookie {
@@ -1189,10 +1197,14 @@ func (s *AccountAdminService) UpsertAT(ctx context.Context, req *dto.ATImportReq
 	}
 
 	// 不存在：创建新账号（同原逻辑）
+	authType := req.AuthType
+	if authType == "" {
+		authType = model.AuthTypeAT
+	}
 	createReq := &dto.AccountCreateReq{
 		Provider:    req.Provider,
 		Name:        req.Name,
-		AuthType:    model.AuthTypeAT,
+		AuthType:    authType,
 		AccessToken: req.AccessToken,
 		Weight:      req.Weight,
 	}

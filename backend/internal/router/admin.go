@@ -137,6 +137,7 @@ func MountAdmin(r *gin.Engine, deps *bootstrap.Deps) *service.AccountPool {
 			sys.GET("/settings", sysH.GetSettings)
 			sys.PUT("/settings", sysH.UpdateSettings)
 			sys.POST("/health-check", sysH.RunHealthCheck)
+			sys.GET("/cron-preview", sysH.CronPreview)
 			sys.GET("/cache", sysH.CacheStats)
 			sys.DELETE("/cache", sysH.CleanCache)
 		}

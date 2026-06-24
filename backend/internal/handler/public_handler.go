@@ -34,6 +34,9 @@ func (h *PublicHandler) ATImport(c *gin.Context) {
 	if req.Provider == "" {
 		req.Provider = "gpt"
 	}
+	if req.AuthType == "" {
+		req.AuthType = "oauth"
+	}
 	if req.Weight <= 0 {
 		req.Weight = 10
 	}

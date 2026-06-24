@@ -6,6 +6,7 @@ import { ApiError } from '../../lib/api';
 import { proxiesApi, systemApi } from '../../lib/services';
 import type { ProxyItem, SystemSettings } from '../../lib/types';
 import { toast } from '../../stores/toast';
+import CronEditor from '../../components/CronEditor';
 
 interface FormState {
   retry_max_attempts: number;
@@ -228,20 +229,11 @@ export default function ConfigPage() {
             <NumberField label="熔断冷却时间（秒）" value={form.tolerance_circuit_cooldown_seconds} min={30} onChange={(v) => set('tolerance_circuit_cooldown_seconds', v)} />
             <Toggle label="启用账号健康巡检" checked={form.tolerance_health_check_enabled} onChange={(v) => set('tolerance_health_check_enabled', v)} />
             <Field label="巡检时间">
-              <select
-                className="select"
+              <CronEditor
                 value={form.tolerance_health_check_cron}
-                onChange={(e) => set('tolerance_health_check_cron', e.target.value)}
+                onChange={(v) => set('tolerance_health_check_cron', v)}
                 disabled={!form.tolerance_health_check_enabled}
-              >
-                <option value="0 */1 * * *">每 1 小时</option>
-                <option value="0 */6 * * *">每 6 小时</option>
-                <option value="0 9 * * *">每天 09:00</option>
-                <option value="0 8 * * *">每天 08:00</option>
-                <option value="0 10 * * *">每天 10:00</option>
-                <option value="0 12 * * *">每天 12:00</option>
-                <option value="0 18 * * *">每天 18:00</option>
-              </select>
+              />
             </Field>
           </Section>
 

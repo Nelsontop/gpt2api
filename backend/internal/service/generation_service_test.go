@@ -66,7 +66,7 @@ func TestCacheResultAssetsReturnsErrorWhenDataURLCannotBeCached(t *testing.T) {
 	}
 }
 
-func TestIsGPTWebAuth401Error(t *testing.T) {
+func TestIsGPTAuth401Error(t *testing.T) {
 	tests := []struct {
 		errMsg string
 		want   bool
@@ -75,26 +75,35 @@ func TestIsGPTWebAuth401Error(t *testing.T) {
 		{"gpt image2 web bootstrap 401: token expired", true},
 		{"gpt image2 web prepare 401: access denied", true},
 		{"gpt image2 web conversation 401: auth fail", true},
+		{"gpt image2 401: unauthorized", true},
+		{"gpt 401: unauthorized", true},
 		{"gpt image2 web bootstrap 403: <html>challenge</html>", false},
-		{"gpt image2 401: unauthorized", false},
 		{"grok video HTTP 401: unauthorized", false},
 		{"", false},
 	}
 	for _, tt := range tests {
 		err := errors.New(tt.errMsg)
-		if got := isGPTWebAuth401Error(err); got != tt.want {
-			t.Errorf("isGPTWebAuth401Error(%q) = %v, want %v", tt.errMsg, got, tt.want)
+		if got := isGPTAuth401Error(err); got != tt.want {
+			t.Errorf("isGPTAuth401Error(%q) = %v, want %v", tt.errMsg, got, tt.want)
 		}
 	}
-	if isGPTWebAuth401Error(nil) {
-		t.Error("isGPTWebAuth401Error(nil) should be false")
+	if isGPTAuth401Error(nil) {
+		t.Error("isGPTAuth401Error(nil) should be false")
 	}
 }
 
-func TestGPTWebAuth401IsRetryable(t *testing.T) {
+func TestGPTAuth401IsRetryable(t *testing.T) {
 	err := errors.New("gpt image2 web requirements 401: unauthorized")
 	if !retryableProviderError(err) {
 		t.Fatal("expected gpt web 401 to be retryable (try other accounts)")
+	}
+	codexErr := errors.New("gpt image2 401: unauthorized")
+	if !retryableProviderError(codexErr) {
+		t.Fatal("expected gpt codex 401 to be retryable (try other accounts)")
+	}
+	legacyErr := errors.New("gpt 401: unauthorized")
+	if !retryableProviderError(legacyErr) {
+		t.Fatal("expected gpt legacy 401 to be retryable (try other accounts)")
 	}
 }
 

@@ -216,7 +216,7 @@ func (s *SystemConfigService) OpenAITokenURL(ctx context.Context) string {
 }
 
 func (s *SystemConfigService) RetryMaxAttempts(ctx context.Context) int {
-	v := s.GetInt(ctx, SettingRetryMaxAttempts, 2)
+	v := s.GetInt(ctx, SettingRetryMaxAttempts, 20)
 	if v < 0 {
 		v = 0
 	}

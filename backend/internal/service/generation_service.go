@@ -274,11 +274,13 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 				}
 				// releaseAcc 已改为 defer s.pool.ReleaseConcurrent(acc.ID)
 				acc = nil
-				if attempt == maxAttempts || !retryableProviderError(derr) {
+				if !retryableProviderError(derr) {
 					s.failTask(ctx, t, fmt.Sprintf("provider call: %v", derr))
 					return
 				}
-				sleepBeforeRetry(ctx, retryDelay, attempt)
+				if !isGPTAuth401Error(derr) {
+					sleepBeforeRetry(ctx, retryDelay, attempt)
+				}
 				continue
 			}
 			provReq.Credential = cred
@@ -293,8 +295,8 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 		}
 		lastErr = err
 		s.pool.MarkSuspect(acc.ID, acc.Weight)
-		if isGPTWebAuth401Error(err) {
-			s.disableProviderAccount(ctx, acc, err.Error())
+		if isGPTAuth401Error(err) {
+			s.pool.MarkTransientFailed(ctx, acc.ID, err.Error())
 		} else if isUsageLimitReachedError(err) {
 			s.markProviderQuotaLimited(ctx, acc, err.Error(), usageLimitResetAt(err))
 		} else if isTransientProviderPathError(t.Provider, err) {
@@ -305,12 +307,14 @@ func (s *GenerationService) runTask(ctx context.Context, t *model.GenerationTask
 		}
 		releaseAcc(acc)
 		acc = nil
-		if attempt == maxAttempts || !retryableProviderError(err) {
+		if !retryableProviderError(err) {
 			s.failTask(ctx, t, fmt.Sprintf("provider call: %v", err))
 			return
 		}
 		log.Warn("provider retrying with next account", zap.Int("attempt", attempt), zap.Uint64("account_id", picked.ID), zap.Error(err))
-		sleepBeforeRetry(ctx, retryDelay, attempt)
+		if !isGPTAuth401Error(err) {
+			sleepBeforeRetry(ctx, retryDelay, attempt)
+		}
 	}
 	if res == nil {
 		releaseAcc(acc)
@@ -1293,7 +1297,7 @@ func retryableProviderError(err error) bool {
 		return false
 	}
 	return isFatalOAuthRefreshError(err) ||
-		isGPTWebAuth401Error(err) ||
+		isGPTAuth401Error(err) ||
 		isUsageLimitReachedError(err) ||
 		strings.Contains(msg, "http 429") ||
 		strings.Contains(msg, "too many requests") ||
@@ -1351,12 +1355,15 @@ func isGPTWebRetryableForbiddenError(msg string) bool {
 		strings.Contains(msg, "request rejected")
 }
 
-func isGPTWebAuth401Error(err error) bool {
+func isGPTAuth401Error(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "gpt image2 web") && strings.Contains(msg, "401")
+	if !strings.Contains(msg, "401") {
+		return false
+	}
+	return strings.Contains(msg, "gpt image2 ") || strings.Contains(msg, "gpt 401")
 }
 
 func isUsageLimitReachedError(err error) bool {
@@ -1412,6 +1419,8 @@ func providerCooldown(err error) time.Duration {
 func userFacingGenerationError(reason string) string {
 	msg := strings.ToLower(reason)
 	switch {
+	case isGPTAuth401Error(errors.New(reason)):
+		return "生成服务暂时不可用，请稍后重试"
 	case isGPTWebRetryableForbiddenError(msg):
 		return "ChatGPT Web 触发风控挑战，请更换可用代理或账号后再试"
 	case strings.Contains(msg, "just a moment"), strings.Contains(msg, "cloudflare"):

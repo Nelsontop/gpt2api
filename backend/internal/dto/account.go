@@ -232,10 +232,11 @@ type AccountSecretsResp struct {
 	ClientID     string `json:"client_id,omitempty"`
 }
 
-// ATImportReq 单个 AT (Access Token) 公开导入请求。
+// ATImportReq 单个 AT (Access Token) 公开导入请求。auth_type 默认 at，也可指定 oauth。
 type ATImportReq struct {
 	Name        string `json:"name"         binding:"required"`
 	AccessToken string `json:"access_token" binding:"required"`
+	AuthType    string `json:"auth_type"    binding:"omitempty,oneof=at oauth"`
 	Provider    string `json:"provider"     binding:"omitempty,oneof=gpt grok"`
 	Weight      int    `json:"weight"       binding:"omitempty,min=1,max=1000"`
 }

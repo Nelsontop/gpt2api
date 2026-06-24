@@ -5,10 +5,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 
 	"github.com/kleinai/backend/internal/middleware"
 	"github.com/kleinai/backend/internal/service"
@@ -121,6 +123,38 @@ func (h *AdminSystemHandler) RunHealthCheck(c *gin.Context) {
 	defer cancel()
 	h.healthCheckSvc.RunOnce(bgCtx)
 	response.OK(c, gin.H{"triggered": true})
+}
+
+// CronPreview GET /admin/api/v1/system/cron-preview?expr=<cron>&n=<count>
+// 返回给定 cron 表达式接下来 n 次执行时间。使用与实际调度一致的 robfig/cron 库。
+func (h *AdminSystemHandler) CronPreview(c *gin.Context) {
+	expr := strings.TrimSpace(c.Query("expr"))
+	if expr == "" {
+		response.Fail(c, errcode.InvalidParam.WithMsg("expr is required"))
+		return
+	}
+	n := 3
+	if v := c.Query("n"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 && parsed <= 20 {
+			n = parsed
+		}
+	}
+	sched, err := cron.ParseStandard(expr)
+	if err != nil {
+		response.Fail(c, errcode.InvalidParam.WithMsg("invalid cron expression: "+err.Error()))
+		return
+	}
+	now := time.Now()
+	times := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		next := sched.Next(now)
+		if next.IsZero() {
+			break
+		}
+		times = append(times, next.Format("2006-01-02 15:04:05"))
+		now = next
+	}
+	response.OK(c, gin.H{"times": times})
 }
 
 func generatedCacheRoot() (string, error) {

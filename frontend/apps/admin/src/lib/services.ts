@@ -281,4 +281,10 @@ export const systemApi = {
       method: 'DELETE',
       data: body,
     }),
+  cronPreview: (expr: string, n = 3) =>
+    request<{ times: string[] }>({
+      url: '/system/cron-preview',
+      method: 'GET',
+      params: { expr, n },
+    }),
 };
