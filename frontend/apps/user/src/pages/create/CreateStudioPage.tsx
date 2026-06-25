@@ -263,7 +263,7 @@ export default function CreateStudioPage() {
       prompt,
       count,
       ratio: imageRatio,
-      ref_assets: attachments.map((item) => item.dataUrl),
+      ref_assets: refAssets(),
       mode: attachments.length ? 'i2i' : 't2i',
       params: { resolution: imageResolution, quality: 'high' },
     }),
@@ -272,13 +272,13 @@ export default function CreateStudioPage() {
   });
 
   const createVideo = useMutation({
-    mutationFn: () => genApi.createVideo({ model: videoModel, prompt, duration, ratio: videoRatio, quality: 'hd', ref_assets: attachments.map((item) => item.dataUrl), mode: attachments.length ? 'i2v' : 't2v' }),
+    mutationFn: () => genApi.createVideo({ model: videoModel, prompt, duration, ratio: videoRatio, quality: 'hd', ref_assets: refAssets(), mode: attachments.length ? 'i2v' : 't2v' }),
     onSuccess: (t) => handleTask(t),
     onError: (e) => toast.error(e instanceof ApiError ? e.message : '生成失败'),
   });
 
   const createText = useMutation({
-    mutationFn: () => genApi.createText({ model: textModel, prompt, max_tokens: 1600, images: attachments.map((item) => item.dataUrl) }),
+    mutationFn: () => genApi.createText({ model: textModel, prompt, max_tokens: 1600, images: refAssets() }),
     onSuccess: async (res) => {
       setTextResult(res.content || '');
       toast.success('文字生成完成');
@@ -342,6 +342,8 @@ export default function CreateStudioPage() {
       else createImage.mutate();
     }, '登录后即可开始创作');
   };
+
+  const refAssets = () => attachments.map((a) => a.type === 'data' ? a.dataUrl : a.url);
 
   const readFileAsDataURL = (file: File) => new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
