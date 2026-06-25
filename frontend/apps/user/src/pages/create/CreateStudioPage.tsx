@@ -227,6 +227,7 @@ export default function CreateStudioPage() {
     setAttachments([]);
   }, [mode]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps — applyReEdit uses stable React setters; effect must fire on mode change only
   useEffect(() => {
     if (reEditQueueRef.current && mode === 'image') {
       applyReEdit(reEditQueueRef.current);
