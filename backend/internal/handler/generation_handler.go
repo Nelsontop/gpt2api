@@ -399,6 +399,7 @@ func taskToResp(t *model.GenerationTask, results []*model.GenerationResult) *dto
 	r := &dto.GenerationTaskResp{
 		TaskID:     t.TaskID,
 		Kind:       t.Kind,
+		Mode:       t.Mode,
 		Status:     t.Status,
 		Progress:   t.Progress,
 		ModelCode:  t.ModelCode,

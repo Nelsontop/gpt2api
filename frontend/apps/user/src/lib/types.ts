@@ -112,6 +112,7 @@ export type TaskStatus = 0 | 1 | 2 | 3 | 4 | 5;
 export interface GenerationTask {
   task_id: string;
   kind: 'image' | 'video' | 'chat';
+  mode?: 't2i' | 'i2i' | 't2v' | 'i2v';
   status: TaskStatus;
   progress: number;
   model: string;

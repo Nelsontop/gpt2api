@@ -48,6 +48,7 @@ type TextGenerationResp struct {
 type GenerationTaskResp struct {
 	TaskID     string                 `json:"task_id"`
 	Kind       string                 `json:"kind"`
+	Mode       string                 `json:"mode,omitempty"`
 	Status     int8                   `json:"status"`
 	Progress   int8                   `json:"progress"`
 	ModelCode  string                 `json:"model"`
