@@ -872,7 +872,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                   className="inline-flex items-center gap-1 rounded-md bg-neutral-800 px-2 py-1 text-xs text-white hover:bg-neutral-700"
                 >
                   <ArrowUpLeft size={12} />
-                  使用此提示词
+                  复用
                 </button>
               )}
               {onReEdit && item.kind === 'image' && item.status === 2 && item.results?.[0]?.url && (
@@ -882,7 +882,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                   className="inline-flex items-center gap-1 rounded-md bg-neutral-800 px-2 py-1 text-xs text-white hover:bg-neutral-700"
                 >
                   <Sparkles size={12} />
-                  二次编辑
+                  编辑
                 </button>
               )}
               <button
