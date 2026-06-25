@@ -456,7 +456,7 @@ export default function CreateStudioPage() {
             <div className="mt-3 flex flex-wrap gap-2">
               {attachments.map((item) => (
                 <div key={item.id} className="group relative h-14 w-14 overflow-hidden rounded-[12px] bg-neutral-100">
-                  <img src={item.dataUrl} alt={item.name} className="h-full w-full object-cover" />
+                  <img src={item.type === 'data' ? item.dataUrl : (item.thumbUrl ?? item.url)} alt={item.name} className="h-full w-full object-cover" />
                   <button
                     type="button"
                     onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== item.id))}
