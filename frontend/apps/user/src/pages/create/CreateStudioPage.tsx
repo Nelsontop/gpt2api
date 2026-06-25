@@ -365,6 +365,7 @@ export default function CreateStudioPage() {
     const picked = imageFiles.slice(0, slots);
     try {
       const data = await Promise.all(picked.map(async (file) => ({
+        type: 'data' as const,
         id: `${file.name}-${file.size}-${file.lastModified}`,
         name: file.name,
         dataUrl: await readFileAsDataURL(file),
