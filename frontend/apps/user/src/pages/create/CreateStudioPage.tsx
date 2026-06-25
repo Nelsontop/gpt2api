@@ -827,24 +827,29 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
         )}
       </button>
       <div className="flex flex-col gap-1.5 px-2.5 py-2 text-xs text-neutral-500">
-        <button
-          type="button"
-          onClick={() => canExpand && setIsExpanded(!isExpanded)}
-          className={clsx(
-            'flex items-center gap-1.5 text-left',
-            canExpand && 'cursor-pointer hover:text-neutral-700'
-          )}
-        >
-          <span className="shrink-0">{fmtRelative(item.created_at)}</span>
-          {prompt && <span className="truncate text-neutral-600">{prompt}</span>}
-          {canExpand && (
+        {canExpand ? (
+          <button
+            type="button"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className={clsx(
+              'flex items-center gap-1.5 rounded px-1 py-0.5 text-left transition',
+              isExpanded ? 'bg-neutral-100 text-neutral-700' : 'cursor-pointer hover:bg-neutral-50 hover:text-neutral-700',
+            )}
+          >
+            <span className="shrink-0">{fmtRelative(item.created_at)}</span>
+            {prompt && <span className="truncate text-neutral-600">{prompt}</span>}
             <ChevronDown
               size={14}
               className={clsx('shrink-0 transition-transform', isExpanded && 'rotate-180')}
             />
-          )}
-        </button>
-        
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <span className="shrink-0">{fmtRelative(item.created_at)}</span>
+            {prompt && <span className="truncate text-neutral-600">{prompt}</span>}
+          </div>
+        )}
+
         {isExpanded && fullPrompt && (
           <div className="mt-1 space-y-2 border-t border-neutral-200 pt-2">
             <p className="whitespace-pre-wrap text-neutral-700 leading-relaxed">
@@ -854,7 +859,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
               <button
                 type="button"
                 onClick={() => navigator.clipboard.writeText(fullPrompt)}
-                className="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-1 text-xs hover:bg-neutral-200"
+                className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-200"
               >
                 <Copy size={12} />
                 复制
@@ -863,7 +868,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                 <button
                   type="button"
                   onClick={() => onUsePrompt(fullPrompt)}
-                  className="inline-flex items-center gap-1 rounded bg-neutral-900 px-2 py-1 text-xs text-white hover:bg-neutral-800"
+                  className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-200"
                 >
                   <ArrowUpLeft size={12} />
                   使用此提示词
@@ -873,7 +878,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                 <button
                   type="button"
                   onClick={() => onReEdit(item)}
-                  className="inline-flex items-center gap-1 rounded bg-sky-500 px-2 py-1 text-xs text-white hover:bg-sky-600"
+                  className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-200"
                 >
                   <Sparkles size={12} />
                   二次编辑
