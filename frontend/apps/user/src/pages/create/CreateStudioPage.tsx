@@ -575,14 +575,15 @@ export default function CreateStudioPage() {
             style={{ columnWidth: '220px' }}
           >
             {resultItems.map((item) => (
-              <WorkCard 
-                key={item.task_id} 
-                item={item} 
+              <WorkCard
+                key={item.task_id}
+                item={item}
                 onOpen={setPreview}
                 onUsePrompt={(p) => {
                   setPrompt(p);
                   promptRef.current?.focus();
                 }}
+                onReEdit={handleReEdit}
               />
             ))}
           </div>
@@ -744,7 +745,7 @@ function HistoryActionMenu({
   );
 }
 
-function WorkCard({ item, onOpen, onUsePrompt }: { item: GenerationTask; onOpen: (preview: { url: string; type: 'image' | 'video'; title: string }) => void; onUsePrompt?: (prompt: string) => void }) {
+function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTask; onOpen: (preview: { url: string; type: 'image' | 'video'; title: string }) => void; onUsePrompt?: (prompt: string) => void; onReEdit?: (item: GenerationTask) => void }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const result = item.results?.[0];
   const thumb = result?.thumb_url;
@@ -865,6 +866,16 @@ function WorkCard({ item, onOpen, onUsePrompt }: { item: GenerationTask; onOpen:
                 >
                   <ArrowUpLeft size={12} />
                   使用此提示词
+                </button>
+              )}
+              {onReEdit && item.kind === 'image' && item.status === 2 && item.results?.[0]?.url && (
+                <button
+                  type="button"
+                  onClick={() => onReEdit(item)}
+                  className="inline-flex items-center gap-1 rounded bg-sky-500 px-2 py-1 text-xs text-white hover:bg-sky-600"
+                >
+                  <Sparkles size={12} />
+                  二次编辑
                 </button>
               )}
               <button
