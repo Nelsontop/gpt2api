@@ -620,7 +620,6 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
   const canOpen = item.status === 2 && !!original;
   const fullPrompt = item.prompt || '';
   const prompt = compactPrompt(fullPrompt);
-  const isI2i = item.kind === 'image' && item.mode === 'i2i';
   const setRatioFromImage = (el: HTMLImageElement) => {
     if (el.naturalWidth > 0 && el.naturalHeight > 0) {
       setLoadedRatio(`${el.naturalWidth} / ${el.naturalHeight}`);
@@ -700,7 +699,6 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
         >
           <span className="shrink-0">{fmtRelative(item.created_at)}</span>
           {prompt && <span className="truncate text-neutral-600">{prompt}</span>}
-          {isI2i && <span className="shrink-0 rounded bg-sky-100 px-1 text-sky-600">{'编辑'}</span>}
           <ChevronDown
             size={14}
             className={clsx('shrink-0 transition-transform ml-auto', isExpanded && 'rotate-180')}
