@@ -819,7 +819,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
         )}
         <div className="absolute left-2 top-2 flex items-center gap-1">
           <span className="rounded-full bg-black/55 px-2 py-0.5 text-xs text-white">{item.kind === 'video' ? '\u89c6\u9891' : '\u56fe\u7247'}</span>
-          {item.mode === 'i2i' && <span className="rounded-full bg-sky-500/80 px-2 py-0.5 text-xs text-white">\u7f16\u8f91</span>}
+          {item.mode === 'i2i' && <span className="rounded-full bg-sky-500/80 px-2 py-0.5 text-xs text-white">{'\u7f16\u8f91'}</span>}
         </div>
         {canOpen && (
           <div className="absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition group-hover:bg-black/20 group-hover:opacity-100">
@@ -840,7 +840,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
         >
           <span className="shrink-0">{fmtRelative(item.created_at)}</span>
           {prompt && <span className="truncate text-neutral-600">{prompt}</span>}
-          {isI2i && <span className="shrink-0 rounded bg-sky-100 px-1 text-sky-600">编辑</span>}
+          {isI2i && <span className="shrink-0 rounded bg-sky-100 px-1 text-sky-600">{'编辑'}</span>}
           <ChevronDown
             size={14}
             className={clsx('shrink-0 transition-transform ml-auto', isExpanded && 'rotate-180')}
@@ -862,7 +862,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                   className="inline-flex items-center gap-1 rounded-md bg-neutral-50 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-100"
                 >
                   <Copy size={12} />
-                  复制
+                  {'复制'}
                 </button>
               )}
               {onUsePrompt && fullPrompt && (
@@ -872,7 +872,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                   className="inline-flex items-center gap-1 rounded-md bg-neutral-800 px-2 py-1 text-xs text-white hover:bg-neutral-700"
                 >
                   <ArrowUpLeft size={12} />
-                  复用
+                  {'复用'}
                 </button>
               )}
               {onReEdit && item.kind === 'image' && item.status === 2 && item.results?.[0]?.url && (
@@ -882,7 +882,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                   className="inline-flex items-center gap-1 rounded-md bg-neutral-800 px-2 py-1 text-xs text-white hover:bg-neutral-700"
                 >
                   <Sparkles size={12} />
-                  编辑
+                  {'编辑'}
                 </button>
               )}
               <button
@@ -890,7 +890,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                 onClick={() => setIsExpanded(false)}
                 className="ml-auto text-neutral-400 hover:text-neutral-600"
               >
-                收起
+                {'收起'}
               </button>
             </div>
           </div>
