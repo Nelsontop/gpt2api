@@ -80,6 +80,11 @@ const HISTORY_PAGE_SIZES = [20, 50, 100] as const;
 type HistoryDeleteScope = 'before_3d' | 'before_7d' | 'all';
 const TEXT_MAX_ATTACHMENTS = 5;
 const VIDEO_MAX_ATTACHMENTS = 7;
+
+type AttachmentItem =
+  | { type: 'data'; id: string; name: string; dataUrl: string }
+  | { type: 'url'; id: string; name: string; url: string; thumbUrl?: string };
+
 const SUGGESTIONS = [
   {
     title: '极简产品广告',
@@ -202,7 +207,7 @@ export default function CreateStudioPage() {
   const [videoRatio, setVideoRatio] = useState<(typeof VIDEO_RATIOS)[number]>('16:9');
   const [count, setCount] = useState(1);
   const [duration, setDuration] = useState<(typeof VIDEO_DURATIONS)[number]>(6);
-  const [attachments, setAttachments] = useState<Array<{ id: string; name: string; dataUrl: string }>>([]);
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const [textResult, setTextResult] = useState('');
   const [task, setTask] = useState<GenerationTask | null>(null);
   const [historyPageSize, setHistoryPageSize] = useState<(typeof HISTORY_PAGE_SIZES)[number]>(20);
