@@ -859,7 +859,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                 <button
                   type="button"
                   onClick={() => navigator.clipboard.writeText(fullPrompt)}
-                  className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-200"
+                  className="inline-flex items-center gap-1 rounded-md bg-neutral-50 px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-100"
                 >
                   <Copy size={12} />
                   复制
@@ -869,7 +869,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                 <button
                   type="button"
                   onClick={() => onUsePrompt(fullPrompt)}
-                  className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-800 hover:bg-neutral-200"
+                  className="inline-flex items-center gap-1 rounded-md bg-neutral-800 px-2 py-1 text-xs text-white hover:bg-neutral-700"
                 >
                   <ArrowUpLeft size={12} />
                   使用此提示词
@@ -879,7 +879,7 @@ function WorkCard({ item, onOpen, onUsePrompt, onReEdit }: { item: GenerationTas
                 <button
                   type="button"
                   onClick={() => onReEdit(item)}
-                  className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-800 hover:bg-neutral-200"
+                  className="inline-flex items-center gap-1 rounded-md bg-neutral-800 px-2 py-1 text-xs text-white hover:bg-neutral-700"
                 >
                   <Sparkles size={12} />
                   二次编辑
