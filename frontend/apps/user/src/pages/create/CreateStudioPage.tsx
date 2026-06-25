@@ -215,6 +215,7 @@ export default function CreateStudioPage() {
   const pollRef = useRef<number | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const reEditQueueRef = useRef<GenerationTask | null>(null);
 
   useEffect(() => () => {
     if (pollRef.current) window.clearInterval(pollRef.current);
@@ -224,6 +225,13 @@ export default function CreateStudioPage() {
     setTask(null);
     setTextResult('');
     setAttachments([]);
+  }, [mode]);
+
+  useEffect(() => {
+    if (reEditQueueRef.current && mode === 'image') {
+      applyReEdit(reEditQueueRef.current);
+      reEditQueueRef.current = null;
+    }
   }, [mode]);
 
   useEffect(() => {
@@ -341,6 +349,25 @@ export default function CreateStudioPage() {
       else if (mode === 'video') createVideo.mutate();
       else createImage.mutate();
     }, '登录后即可开始创作');
+  };
+
+  const applyReEdit = (item: GenerationTask) => {
+    const result = item.results?.[0];
+    if (!result?.url) return;
+    setPrompt(item.prompt || '');
+    setAttachments([
+      { type: 'url', id: `reedit-${item.task_id}`, name: '二次编辑', url: result.url, thumbUrl: result.thumb_url },
+    ]);
+    promptRef.current?.focus();
+  };
+
+  const handleReEdit = (item: GenerationTask) => {
+    if (mode !== 'image') {
+      reEditQueueRef.current = item;
+      navigate('/create/image');
+      return;
+    }
+    applyReEdit(item);
   };
 
   const refAssets = () => attachments.map((a) => a.type === 'data' ? a.dataUrl : a.url);
