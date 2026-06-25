@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUp,
   ArrowUpLeft,
@@ -10,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   FileImage,
-  Image,
   Loader2,
   Maximize2,
   Mic,
@@ -19,7 +17,6 @@ import {
   Play,
   Sparkles,
   Trash2,
-  Video,
   X,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -32,14 +29,6 @@ import type { GenerationTask, PublicModel } from '../../lib/types';
 import { useAuthStore } from '../../stores/auth';
 import { toast } from '../../stores/toast';
 
-type StudioMode = 'image' | 'text' | 'video';
-
-const MODES: Array<{ value: StudioMode; label: string; icon: typeof Image }> = [
-  { value: 'image', label: '图片', icon: Image },
-  { value: 'text', label: '文字', icon: Sparkles },
-  { value: 'video', label: '视频', icon: Video },
-];
-
 const GENERATING_PHRASES = [
   '正在为您设计中...',
   '灵感正在慢慢成形',
@@ -51,35 +40,10 @@ const IMAGE_MODELS = [
   { code: 'gpt-image-2', label: 'GPT Image 2', cost: 0 },
 ];
 
-type SelectModel = {
-  code: string;
-  label: string;
-  cost?: number;
-  input?: number;
-  output?: number;
-};
-
-const VIDEO_MODELS = [
-  { code: 'grok-imagine-video', label: 'Grok Imagine 视频', cost: 20 },
-  { code: 'vid-i2v', label: 'Grok 图生视频', cost: 20 },
-];
-
-const TEXT_MODELS = [
-  { code: 'grok-4.20-fast', label: 'Grok Fast', input: 1, output: 3 },
-  { code: 'grok-4.20-auto', label: 'Grok Auto', input: 1.5, output: 4.5 },
-  { code: 'grok-4.20-expert', label: 'Grok Expert', input: 2, output: 6 },
-  { code: 'grok-4.20-heavy', label: 'Grok Heavy', input: 4, output: 12 },
-  { code: 'gpt-4o-mini', label: 'GPT 4o mini', input: 1, output: 3 },
-];
-
 const IMAGE_RATIOS = ['1:1', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '16:9', '9:16', '21:9'] as const;
 const IMAGE_RESOLUTIONS = ['1K', '2K', '4K'] as const;
-const VIDEO_RATIOS = ['16:9', '9:16', '1:1'] as const;
-const VIDEO_DURATIONS = [6, 10] as const;
 const HISTORY_PAGE_SIZES = [20, 50, 100] as const;
 type HistoryDeleteScope = 'before_3d' | 'before_7d' | 'all';
-const TEXT_MAX_ATTACHMENTS = 5;
-const VIDEO_MAX_ATTACHMENTS = 7;
 
 type AttachmentItem =
   | { type: 'data'; id: string; name: string; dataUrl: string }
@@ -180,8 +144,6 @@ photorealistic, ultra detailed, cinematic studio lighting, realistic figurine, c
 ];
 
 export default function CreateStudioPage() {
-  const location = useLocation();
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const ensureLoggedIn = useEnsureLoggedIn();
   const refreshMe = useAuthStore((s) => s.refreshMe);
@@ -194,52 +156,27 @@ export default function CreateStudioPage() {
   });
 
   const imageModels = useMemo(() => modelsByKind(modelCatalog.data, 'image', IMAGE_MODELS), [modelCatalog.data]);
-  const textModels = useMemo(() => modelsByKind(modelCatalog.data, 'text', TEXT_MODELS), [modelCatalog.data]);
-  const videoModels = useMemo(() => modelsByKind(modelCatalog.data, 'video', VIDEO_MODELS), [modelCatalog.data]);
 
-  const mode = modeFromPath(location.pathname);
   const [prompt, setPrompt] = useState('');
-  const [textModel, setTextModel] = useState(TEXT_MODELS[0]!.code);
   const [imageModel, setImageModel] = useState(IMAGE_MODELS[0]!.code);
-  const [videoModel, setVideoModel] = useState(VIDEO_MODELS[0]!.code);
   const [imageRatio, setImageRatio] = useState<(typeof IMAGE_RATIOS)[number]>('1:1');
   const [imageResolution, setImageResolution] = useState<(typeof IMAGE_RESOLUTIONS)[number]>('1K');
-  const [videoRatio, setVideoRatio] = useState<(typeof VIDEO_RATIOS)[number]>('16:9');
   const [count, setCount] = useState(1);
-  const [duration, setDuration] = useState<(typeof VIDEO_DURATIONS)[number]>(6);
   const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
-  const [textResult, setTextResult] = useState('');
   const [task, setTask] = useState<GenerationTask | null>(null);
   const [historyPageSize, setHistoryPageSize] = useState<(typeof HISTORY_PAGE_SIZES)[number]>(20);
   const [preview, setPreview] = useState<{ url: string; type: 'image' | 'video'; title: string } | null>(null);
   const pollRef = useRef<number | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const reEditQueueRef = useRef<GenerationTask | null>(null);
 
   useEffect(() => () => {
     if (pollRef.current) window.clearInterval(pollRef.current);
   }, []);
 
   useEffect(() => {
-    setTask(null);
-    setTextResult('');
-    setAttachments([]);
-  }, [mode]);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps — applyReEdit uses stable React setters; effect must fire on mode change only
-  useEffect(() => {
-    if (reEditQueueRef.current && mode === 'image') {
-      applyReEdit(reEditQueueRef.current);
-      reEditQueueRef.current = null;
-    }
-  }, [mode]);
-
-  useEffect(() => {
     if (imageModels.length && !imageModels.some((m) => m.code === imageModel)) setImageModel(imageModels[0]!.code);
-    if (textModels.length && !textModels.some((m) => m.code === textModel)) setTextModel(textModels[0]!.code);
-    if (videoModels.length && !videoModels.some((m) => m.code === videoModel)) setVideoModel(videoModels[0]!.code);
-  }, [imageModel, imageModels, textModel, textModels, videoModel, videoModels]);
+  }, [imageModel, imageModels]);
 
   useEffect(() => {
     const el = promptRef.current;
@@ -247,7 +184,7 @@ export default function CreateStudioPage() {
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
     el.style.overflowY = el.scrollHeight > 260 ? 'auto' : 'hidden';
-  }, [prompt, mode]);
+  }, [prompt]);
 
   const history = useQuery({
     queryKey: ['gen.history', 'studio', token, historyPageSize],
@@ -280,23 +217,6 @@ export default function CreateStudioPage() {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : '生成失败'),
   });
 
-  const createVideo = useMutation({
-    mutationFn: () => genApi.createVideo({ model: videoModel, prompt, duration, ratio: videoRatio, quality: 'hd', ref_assets: refAssets(), mode: attachments.length ? 'i2v' : 't2v' }),
-    onSuccess: (t) => handleTask(t),
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : '生成失败'),
-  });
-
-  const createText = useMutation({
-    mutationFn: () => genApi.createText({ model: textModel, prompt, max_tokens: 1600, images: refAssets() }),
-    onSuccess: async (res) => {
-      setTextResult(res.content || '');
-      toast.success('文字生成完成');
-      await refreshMe();
-      qc.invalidateQueries({ queryKey: ['gen.history'] });
-    },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : '生成失败'),
-  });
-
   const inProgress = task && (task.status === 0 || task.status === 1);
   const resultItems = useMemo(() => {
     const visible = (item: GenerationTask) => (item.kind === 'image' || item.kind === 'video') && item.status !== 3;
@@ -305,12 +225,7 @@ export default function CreateStudioPage() {
     return [...current, ...rest].filter((item, idx, arr) => arr.findIndex((x) => x.task_id === item.task_id) === idx);
   }, [history.data?.list, task]);
 
-  const expectedCost = mode === 'video'
-    ? Math.round(((videoModels.find((m) => m.code === videoModel)?.cost ?? 20) * duration) / 6)
-    : mode === 'text'
-      ? '按实际 Token'
-      : (imageModels.find((m) => m.code === imageModel)?.cost ?? 4) * count;
-  const maxAttachments = mode === 'video' ? VIDEO_MAX_ATTACHMENTS : TEXT_MAX_ATTACHMENTS;
+  const expectedCost = (imageModels.find((m) => m.code === imageModel)?.cost ?? 4) * count;
 
   const handleTask = (t: GenerationTask) => {
     setTask(t);
@@ -337,7 +252,7 @@ export default function CreateStudioPage() {
       } catch {
         // keep polling quietly
       }
-    }, mode === 'video' ? 2000 : 1500);
+    }, 1500);
   };
 
   const submit = () => {
@@ -346,9 +261,7 @@ export default function CreateStudioPage() {
       return;
     }
     ensureLoggedIn(() => {
-      if (mode === 'text') createText.mutate();
-      else if (mode === 'video') createVideo.mutate();
-      else createImage.mutate();
+      createImage.mutate();
     }, '登录后即可开始创作');
   };
 
@@ -363,11 +276,6 @@ export default function CreateStudioPage() {
   };
 
   const handleReEdit = (item: GenerationTask) => {
-    if (mode !== 'image') {
-      reEditQueueRef.current = item;
-      navigate('/create/image');
-      return;
-    }
     applyReEdit(item);
   };
 
@@ -387,9 +295,9 @@ export default function CreateStudioPage() {
       toast.info('请选择图片文件');
       return;
     }
-    const slots = Math.max(0, maxAttachments - attachments.length);
+    const slots = Math.max(0, 5 - attachments.length);
     if (slots <= 0) {
-      toast.info(`最多上传 ${maxAttachments} 张参考图`);
+      toast.info('最多上传 5 张参考图');
       return;
     }
     const picked = imageFiles.slice(0, slots);
@@ -401,7 +309,7 @@ export default function CreateStudioPage() {
         dataUrl: await readFileAsDataURL(file),
       })));
       setAttachments((prev) => [...prev, ...data]);
-      if (imageFiles.length > slots) toast.info(`已保留前 ${maxAttachments} 张参考图`);
+      if (imageFiles.length > slots) toast.info('最多上传 5 张参考图');
     } catch {
       toast.error('读取图片失败');
     } finally {
@@ -412,9 +320,8 @@ export default function CreateStudioPage() {
   return (
     <div className="mx-auto min-h-screen w-full max-w-[1500px] px-4 pb-12 pt-10 sm:px-8 lg:px-12">
       <section className="mx-auto max-w-[760px]">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-[28px] font-medium tracking-normal text-neutral-950">{modeTitle(mode)}</h1>
-          <ModeSwitch mode={mode} onChange={(next) => navigate(`/create/${next}`)} />
+        <div className="mb-6">
+          <h1 className="text-[28px] font-medium tracking-normal text-neutral-950">{'图片'}</h1>
         </div>
 
         <div className="rounded-[28px] border border-neutral-200 bg-white p-4 shadow-[0_18px_55px_rgba(15,23,42,.10)]">
@@ -422,7 +329,7 @@ export default function CreateStudioPage() {
             ref={promptRef}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder={mode === 'image' ? '描述新图片' : mode === 'video' ? '描述新视频' : '写下你想生成的文字内容'}
+            placeholder={'描述新图片'}
             className="studio-prompt min-h-[66px] w-full resize-none border-0 bg-transparent px-2 pt-1 text-[15px] font-normal leading-7 text-neutral-950 outline-none ring-0 placeholder:font-normal placeholder:text-neutral-400 focus:border-0 focus:outline-none focus:ring-0"
             maxLength={5000}
           />
@@ -445,38 +352,27 @@ export default function CreateStudioPage() {
                 <Paperclip size={18} />
               </button>
               <ComposerSelect
-                value={mode === 'video' ? videoModel : mode === 'text' ? textModel : imageModel}
-                onChange={(v) => mode === 'video' ? setVideoModel(v) : mode === 'text' ? setTextModel(v) : setImageModel(v)}
-                options={(mode === 'video' ? videoModels : mode === 'text' ? textModels : imageModels).map((m) => ({ value: m.code, label: m.label }))}
-                wide={mode !== 'image'}
+                value={imageModel}
+                onChange={(v) => setImageModel(v)}
+                options={imageModels.map((m) => ({ value: m.code, label: m.label }))}
               />
-              {mode === 'image' && (
-                <>
                   <ComposerSelect value={imageRatio} onChange={(v) => setImageRatio(v as typeof IMAGE_RATIOS[number])} options={IMAGE_RATIOS.map((r) => ({ value: r, label: r }))} />
                   <ComposerSelect value={imageResolution} onChange={(v) => setImageResolution(v as typeof IMAGE_RESOLUTIONS[number])} options={IMAGE_RESOLUTIONS.map((r) => ({ value: r, label: r }))} />
                   <ComposerSelect value={String(count)} onChange={(v) => setCount(Number(v))} options={[1, 2, 4].map((n) => ({ value: String(n), label: `${n}张` }))} />
-                </>
-              )}
-              {mode === 'video' && (
-                <>
-                  <ComposerSelect value={videoRatio} onChange={(v) => setVideoRatio(v as typeof VIDEO_RATIOS[number])} options={VIDEO_RATIOS.map((r) => ({ value: r, label: r }))} />
-                  <ComposerSelect value={String(duration)} onChange={(v) => setDuration(Number(v) as typeof VIDEO_DURATIONS[number])} options={VIDEO_DURATIONS.map((n) => ({ value: String(n), label: `${n}s` }))} />
-                </>
-              )}
             </div>
             <div className="flex items-center gap-2">
-              <span className="hidden text-sm text-neutral-400 sm:inline">{typeof expectedCost === 'number' ? `${expectedCost} 点` : expectedCost}</span>
+              <span className="hidden text-sm text-neutral-400 sm:inline">{expectedCost}{'点'}</span>
               <button className="grid h-8 w-8 place-items-center rounded-full text-neutral-600 hover:bg-neutral-100" title="语音输入" type="button">
                 <Mic size={18} />
               </button>
               <button
                 type="button"
                 onClick={submit}
-                disabled={!!inProgress || createImage.isPending || createVideo.isPending || createText.isPending}
+                disabled={!!inProgress || createImage.isPending}
                 className="grid h-10 w-10 place-items-center rounded-full bg-neutral-950 text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
                 title="生成"
               >
-                {inProgress || createImage.isPending || createVideo.isPending || createText.isPending ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={19} />}
+                {inProgress || createImage.isPending ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={19} />}
               </button>
             </div>
           </div>
@@ -500,18 +396,7 @@ export default function CreateStudioPage() {
         </div>
       </section>
 
-      {mode === 'text' && textResult && (
-        <section className="mx-auto mt-8 max-w-[760px] rounded-[24px] border border-neutral-200 bg-white p-5 text-[15px] leading-7 text-neutral-800 shadow-sm">
-          <div className="mb-3 flex items-center justify-between text-sm text-neutral-400">
-            <span>{textModels.find((m) => m.code === textModel)?.label ?? textModel}</span>
-            <span>{textResult.length} 字</span>
-          </div>
-          <div className="whitespace-pre-wrap">{textResult}</div>
-        </section>
-      )}
-
-      {mode === 'image' && (
-        <section className="mx-auto mt-12 max-w-[760px]">
+      <section className="mx-auto mt-12 max-w-[760px]">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-[20px] font-medium text-neutral-950">创建图片</h2>
             <div className="flex items-center gap-2 text-neutral-400">
@@ -534,7 +419,6 @@ export default function CreateStudioPage() {
             ))}
           </div>
         </section>
-      )}
 
       <section className="mt-14">
         <div className="mx-auto mb-4 flex max-w-[1500px] items-center justify-between gap-3 px-0">
@@ -591,30 +475,6 @@ export default function CreateStudioPage() {
         )}
       </section>
       {preview && <PreviewLightbox preview={preview} onClose={() => setPreview(null)} />}
-    </div>
-  );
-}
-
-function ModeSwitch({ mode, onChange }: { mode: StudioMode; onChange: (mode: StudioMode) => void }) {
-  return (
-    <div className="inline-flex rounded-full bg-neutral-100 p-1">
-      {MODES.map((m) => {
-        const Icon = m.icon;
-        return (
-          <button
-            key={m.value}
-            type="button"
-            onClick={() => onChange(m.value)}
-            className={clsx(
-              'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm transition',
-              mode === m.value ? 'bg-white text-neutral-950 shadow-sm' : 'text-neutral-600 hover:text-neutral-950',
-            )}
-          >
-            <Icon size={15} />
-            {m.label}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -957,18 +817,6 @@ function PreviewLightbox({ preview, onClose }: { preview: { url: string; type: '
   );
 }
 
-function modeFromPath(pathname: string): StudioMode {
-  if (pathname.includes('/create/video')) return 'video';
-  if (pathname.includes('/create/text')) return 'text';
-  return 'image';
-}
-
-function modeTitle(mode: StudioMode) {
-  if (mode === 'video') return '视频';
-  if (mode === 'text') return '文字';
-  return '图片';
-}
-
 function statusText(status: number) {
   if (status === 2) return '已完成';
   if (status === 3) return '失败';
@@ -977,7 +825,7 @@ function statusText(status: number) {
   return '排队中';
 }
 
-function modelsByKind(models: PublicModel[] | undefined, kind: PublicModel['kind'], fallback: SelectModel[]): SelectModel[] {
+function modelsByKind(models: PublicModel[] | undefined, kind: PublicModel['kind'], fallback: { code: string; label: string; cost?: number; input?: number; output?: number }[]): { code: string; label: string; cost?: number; input?: number; output?: number }[] {
   const rows = (models ?? [])
     .filter((m) => m.enabled !== false && m.kind === kind && m.model_code)
     .map((m) => ({
